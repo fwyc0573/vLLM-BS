@@ -72,6 +72,10 @@ class MultiConnector(KVConnectorBase_V1):
         for c in self._connectors:
             c.register_kv_caches(kv_caches)
 
+    def has_connector_metadata(self) -> bool:
+        """Check if all connectors have valid metadata."""
+        return all(c.has_connector_metadata() for c in self._connectors)
+
     # We must override the base class method here because we need to bind
     # the metadata to each connector in the order of the connectors in the
     # MultiKVConnectorMetadata.

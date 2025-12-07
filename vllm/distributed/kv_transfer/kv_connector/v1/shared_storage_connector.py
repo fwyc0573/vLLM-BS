@@ -113,29 +113,39 @@ class SharedStorageConnector(KVConnectorBase_V1):
 
             Args:
                 dst_kv_cache_layer (torch.Tensor): the destination KV cache 
-                    layer. In shape [2, num_pages, page_size, xxx] if not 
-                    using MLA, [num_pages, page_size, xxx] otherwise.
-                src_kv_cache (torch.Tensor): the source KV cache. In shape
-                    [2, num_tokens, xxx] if not using MLA, [num_tokens, xxx] 
-                    otherwise.
+                    layer. Supports multiple layouts:
+                    - FlashInfer NHD: [num_blocks, 2, block_size, num_kv_heads, head_size]
+                    - FlashInfer HND: [num_blocks, 2, num_kv_heads, block_size, head_size]
+                    - Standard: [2, num_pages, page_size, xxx]
+                    - MLA: [num_pages, page_size, xxx]
+                src_kv_cache (torch.Tensor): the source KV cache.
                 slot_mapping (torch.Tensor): the slot mapping. In shape 
                     [num_tokens].
             """
-            dst_kv_cache_layer_shape = dst_kv_cache_layer.shape
+            shape = dst_kv_cache_layer.shape
+            ndim = len(shape)
+            
             if isinstance(attn_metadata, MLACommonMetadata):
-                num_pages = dst_kv_cache_layer_shape[0]
-                page_size = dst_kv_cache_layer_shape[1]
-                dst_kv_cache_layer = dst_kv_cache_layer.reshape(
-                    num_pages * page_size, -1)
-                dst_kv_cache_layer[slot_mapping, ...] = src_kv_cache
-                dst_kv_cache_layer.reshape(dst_kv_cache_layer_shape)
+                # MLA format: [num_pages, page_size, xxx]
+                num_pages = shape[0]
+                page_size = shape[1]
+                flat_view = dst_kv_cache_layer.view(num_pages * page_size, -1)
+                flat_view[slot_mapping, ...] = src_kv_cache
+            elif ndim == 5:
+                # FlashInfer format: [num_blocks, 2, block_size, num_kv_heads, head_size]
+                # or [num_blocks, 2, num_kv_heads, block_size, head_size]
+                num_blocks, _, block_size = shape[0], shape[1], shape[2]
+                num_kv_heads, head_size = shape[3], shape[4]
+                # Reshape to [2, num_blocks * block_size, num_kv_heads * head_size]
+                flat_view = dst_kv_cache_layer.permute(1, 0, 2, 3, 4).reshape(
+                    2, num_blocks * block_size, num_kv_heads * head_size)
+                flat_view[:, slot_mapping, ...] = src_kv_cache
             else:
-                num_pages = dst_kv_cache_layer_shape[1]
-                page_size = dst_kv_cache_layer_shape[2]
-                dst_kv_cache_layer = dst_kv_cache_layer.reshape(
-                    2, num_pages * page_size, -1)
-                dst_kv_cache_layer[:, slot_mapping, ...] = src_kv_cache
-                dst_kv_cache_layer.reshape(dst_kv_cache_layer_shape)
+                # Standard format: [2, num_pages, page_size, xxx]
+                num_pages = shape[1]
+                page_size = shape[2]
+                flat_view = dst_kv_cache_layer.view(2, num_pages * page_size, -1)
+                flat_view[:, slot_mapping, ...] = src_kv_cache
 
         # Get the metadata
         metadata: KVConnectorMetadata = self._get_connector_metadata()
@@ -209,16 +219,31 @@ class SharedStorageConnector(KVConnectorBase_V1):
         ) -> torch.Tensor:
             """Extract the KV cache from the layer.
 
-            Assume the shape of the layer is (2, num_pages, page_size, xxx)
-            if MLA is not used, and (num_pages, page_size, xxx) otherwise.
+            Supports multiple layouts:
+            - FlashInfer NHD: [num_blocks, 2, block_size, num_kv_heads, head_size]
+            - FlashInfer HND: [num_blocks, 2, num_kv_heads, block_size, head_size]
+            - Standard: [2, num_pages, page_size, xxx]
+            - MLA: [num_pages, page_size, xxx]
             """
+            shape = layer.shape
+            ndim = len(shape)
+            
             if isinstance(attn_metadata, MLACommonMetadata):
-                num_pages, page_size = layer.shape[0], layer.shape[1]
-                return layer.reshape(num_pages * page_size, -1)[slot_mapping,
-                                                                ...]
-            num_pages, page_size = layer.shape[1], layer.shape[2]
-            return layer.reshape(2, num_pages * page_size, -1)[:, slot_mapping,
-                                                               ...]
+                # MLA format: [num_pages, page_size, xxx]
+                num_pages, page_size = shape[0], shape[1]
+                return layer.reshape(num_pages * page_size, -1)[slot_mapping, ...]
+            elif ndim == 5:
+                # FlashInfer format: [num_blocks, 2, block_size, num_kv_heads, head_size]
+                num_blocks, _, block_size = shape[0], shape[1], shape[2]
+                num_kv_heads, head_size = shape[3], shape[4]
+                # Reshape to [2, num_blocks * block_size, num_kv_heads * head_size]
+                flat_view = layer.permute(1, 0, 2, 3, 4).reshape(
+                    2, num_blocks * block_size, num_kv_heads * head_size)
+                return flat_view[:, slot_mapping, ...]
+            else:
+                # Standard format: [2, num_pages, page_size, xxx]
+                num_pages, page_size = shape[1], shape[2]
+                return layer.reshape(2, num_pages * page_size, -1)[:, slot_mapping, ...]
 
         connector_metadata = self._get_connector_metadata()
         assert isinstance(connector_metadata, SharedStorageConnectorMetadata)

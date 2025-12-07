@@ -489,6 +489,7 @@ class LLMEngine:
         if envs.VLLM_USE_V1:
             from vllm.v1.engine.llm_engine import LLMEngine as V1LLMEngine
             engine_cls = V1LLMEngine
+            print("YC: vllm.v1.engine ...")
 
         return engine_cls.from_vllm_config(
             vllm_config=vllm_config,

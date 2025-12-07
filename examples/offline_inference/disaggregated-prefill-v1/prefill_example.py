@@ -4,6 +4,11 @@
 from vllm import LLM, SamplingParams
 from vllm.config import KVTransferConfig
 
+# profiling codes
+import os
+# os.environ["VLLM_TORCH_PROFILER_DIR"] = "./vllm_profile"
+# os.environ["VLLM_CUSTOM_SCOPES_FOR_PROFILING"] = "1"
+
 
 def read_prompts():
     context = "Hi " * 1000
@@ -32,11 +37,23 @@ def main():
         ),
     )  # , max_model_len=2048, max_num_batched_tokens=2048)
 
+    # llm.start_profile()
+    # 1ST generation (prefill instance)
+    # warm up
+    _ = llm.generate(
+        prompts,
+        sampling_params,
+    )
+    # llm.stop_profile()
+
+
+    llm.start_profile()
     # 1ST generation (prefill instance)
     outputs = llm.generate(
         prompts,
         sampling_params,
     )
+    llm.stop_profile()
 
     new_prompts = []
     print("-" * 30)

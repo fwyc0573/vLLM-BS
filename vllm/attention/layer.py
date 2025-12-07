@@ -437,6 +437,10 @@ def wait_for_kv_layer_from_connector(layer_name: str):
 
     connector = get_kv_transfer_group()
 
+    # Skip if connector metadata is not set (e.g., during warmup/dummy runs)
+    if not connector.has_connector_metadata():
+        return
+
     forward_context: ForwardContext = get_forward_context()
     attn_metadata = forward_context.attn_metadata
     if attn_metadata is None:
@@ -453,6 +457,10 @@ def maybe_save_kv_layer_to_connector(
         return
 
     connector = get_kv_transfer_group()
+
+    # Skip if connector metadata is not set (e.g., during warmup/dummy runs)
+    if not connector.has_connector_metadata():
+        return
 
     forward_context: ForwardContext = get_forward_context()
     attn_metadata = forward_context.attn_metadata

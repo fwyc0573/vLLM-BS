@@ -20,7 +20,7 @@ def main():
     llm = LLM(model="facebook/opt-125m", disable_log_stats=False)
 
     # Generate texts from the prompts.
-    outputs = llm.generate(prompts, sampling_params)
+    outputs = llm.genera bte(prompts, sampling_params)
 
     # Print the outputs.
     print("-" * 50)

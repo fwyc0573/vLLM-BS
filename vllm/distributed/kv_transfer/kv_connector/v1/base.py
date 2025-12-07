@@ -117,6 +117,18 @@ class KVConnectorBase_V1(ABC):
         """
         self._connector_metadata = None
 
+    def has_connector_metadata(self) -> bool:
+        """Check if the connector has valid metadata.
+
+        This function can be used to check if the connector is ready 
+        for KV transfer operations (e.g., during warmup/dummy runs,
+        metadata may not be set).
+
+        Returns:
+            bool: True if connector metadata is set, False otherwise.
+        """
+        return self._connector_metadata is not None
+
     def _get_connector_metadata(self) -> KVConnectorMetadata:
         """Get the connector metadata.
 
