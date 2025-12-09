@@ -1,0 +1,17 @@
+============================================================
+Testing vLLM Import
+============================================================
+
+Python: /research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/bin/python
+Python version: 3.10.16 (main, Dec 11 2024, 16:24:50) [GCC 11.2.0]
+
+--- Testing basic imports ---
+[OK] torch: 2.8.0+cu128
+     CUDA available: True
+     CUDA version: 12.8
+     GPU count: 8
+[FAIL] vllm import: No module named 'vllm'
+Traceback (most recent call last):
+  File "/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/test_vllm_import.py", line 35, in main
+    from vllm import LLM, SamplingParams
+ModuleNotFoundError: No module named 'vllm'

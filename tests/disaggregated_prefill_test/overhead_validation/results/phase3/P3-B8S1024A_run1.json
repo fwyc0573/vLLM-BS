@@ -1,0 +1,111 @@
+{
+  "test_id": "P3-B8S1024A",
+  "model": "TinyLlama-1.1B",
+  "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "batch_size": 8,
+  "seq_len": 1024,
+  "profiling_enabled": true,
+  "run_index": 1,
+  "self_cpu_time_ms": 52.412,
+  "self_cuda_time_ms": 85.5,
+  "e2e_latency_ms": 60.494,
+  "total_scope_calls": 29,
+  "scope_timings": {
+    "Preprocess": {
+      "cpu_time_ms": 0.0,
+      "count": 1,
+      "cuda_time_ms": 1.0932459999999993
+    },
+    "Forward": {
+      "cpu_time_ms": 0.0,
+      "count": 1,
+      "cuda_time_ms": 47.396675
+    },
+    "input_layernorm": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 0.0962880000000041
+    },
+    "attn_pre_proj": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 0.33631799999998657
+    },
+    "attn_rope": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 0.10127800000001298
+    },
+    "attn": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 14.227491000000025
+    },
+    "attn_post_proj": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 0.33126400000000283
+    },
+    "post_attention_layernorm": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 0.09478400000001057
+    },
+    "mlp_up_proj": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 0.8367649999999703
+    },
+    "mlp_act": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 0.14601699999999618
+    },
+    "mlp_down_proj": {
+      "cpu_time_ms": 0.0,
+      "count": 22,
+      "cuda_time_ms": 12.802664000000004
+    },
+    "Postprocess": {
+      "cpu_time_ms": 0.0,
+      "count": 1,
+      "cuda_time_ms": 0.3071999999999971
+    },
+    "Sample": {
+      "cpu_time_ms": 0.0,
+      "count": 1,
+      "cuda_time_ms": 0.10742399999999906
+    },
+    "Bookkeep": {
+      "cpu_time_ms": 0.0,
+      "count": 1,
+      "cuda_time_ms": 0.03372699999999895
+    },
+    "EPLB": {
+      "cpu_time_ms": 0.02382300000000396,
+      "count": 1,
+      "cuda_time_ms": 0.0
+    }
+  },
+  "category_timings": {
+    "attention": {
+      "count": 176,
+      "cpu_time_ms": 4.837022999999975
+    },
+    "mlp": {
+      "count": 132,
+      "cpu_time_ms": 2.7215660000000064
+    },
+    "layernorm": {
+      "count": 88,
+      "cpu_time_ms": 2.0159039999999875
+    },
+    "pipeline": {
+      "count": 11,
+      "cpu_time_ms": 5.1595280000000185
+    }
+  },
+  "timestamp": "2025-12-08T22:10:06.609674",
+  "success": true,
+  "error_message": null
+}

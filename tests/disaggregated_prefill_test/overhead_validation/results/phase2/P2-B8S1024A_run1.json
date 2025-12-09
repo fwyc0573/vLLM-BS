@@ -1,0 +1,16 @@
+{
+  "test_id": "P2-B8S1024A",
+  "model": "TinyLlama-1.1B",
+  "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "batch_size": 8,
+  "seq_len": 1024,
+  "profiling_enabled": true,
+  "run_index": 1,
+  "self_cpu_time_ms": 76.108,
+  "self_cuda_time_ms": 133.462,
+  "e2e_latency_ms": 84.678,
+  "total_scope_calls": 31,
+  "timestamp": "2025-12-08T17:41:08.702341",
+  "success": true,
+  "error_message": null
+}

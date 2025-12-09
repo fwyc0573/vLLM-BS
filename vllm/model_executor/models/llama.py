@@ -50,6 +50,7 @@ from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors
+from vllm.v1.utils import record_function_or_nullcontext
 
 from .interfaces import SupportsEagle3, SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, PPMissingLayer, extract_layer_index,
@@ -92,9 +93,12 @@ class LlamaMLP(nn.Module):
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        x, _ = self.gate_up_proj(x)
-        x = self.act_fn(x)
-        x, _ = self.down_proj(x)
+        with record_function_or_nullcontext("mlp_up_proj"):
+            x, _ = self.gate_up_proj(x)
+        with record_function_or_nullcontext("mlp_act"):
+            x = self.act_fn(x)
+        with record_function_or_nullcontext("mlp_down_proj"):
+            x, _ = self.down_proj(x)
         return x
 
 
@@ -210,11 +214,15 @@ class LlamaAttention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q, k, v)
-        output, _ = self.o_proj(attn_output)
+        with record_function_or_nullcontext("attn_pre_proj"):
+            qkv, _ = self.qkv_proj(hidden_states)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+        with record_function_or_nullcontext("attn_rope"):
+            q, k = self.rotary_emb(positions, q, k)
+        with record_function_or_nullcontext("attn"):
+            attn_output = self.attn(q, k, v)
+        with record_function_or_nullcontext("attn_post_proj"):
+            output, _ = self.o_proj(attn_output)
         return output
 
     def _init_rotary_emb(self, config: LlamaConfig,
@@ -309,18 +317,20 @@ class LlamaDecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
-        if residual is None:
-            residual = hidden_states
-            hidden_states = self.input_layernorm(hidden_states)
-        else:
-            hidden_states, residual = self.input_layernorm(
-                hidden_states, residual)
+        with record_function_or_nullcontext("input_layernorm"):
+            if residual is None:
+                residual = hidden_states
+                hidden_states = self.input_layernorm(hidden_states)
+            else:
+                hidden_states, residual = self.input_layernorm(
+                    hidden_states, residual)
         hidden_states = self.self_attn(positions=positions,
                                        hidden_states=hidden_states)
 
         # Fully Connected
-        hidden_states, residual = self.post_attention_layernorm(
-            hidden_states, residual)
+        with record_function_or_nullcontext("post_attention_layernorm"):
+            hidden_states, residual = self.post_attention_layernorm(
+                hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 

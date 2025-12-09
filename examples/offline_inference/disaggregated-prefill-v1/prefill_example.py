@@ -3,6 +3,7 @@
 
 from vllm import LLM, SamplingParams
 from vllm.config import KVTransferConfig
+from vllm.v1.utils import record_function_or_nullcontext
 
 # profiling codes
 import os
@@ -40,19 +41,21 @@ def main():
     # llm.start_profile()
     # 1ST generation (prefill instance)
     # warm up
-    _ = llm.generate(
-        prompts,
-        sampling_params,
-    )
+    for _ in range(5):
+        _ = llm.generate(
+            prompts,
+            sampling_params,
+        )
     # llm.stop_profile()
 
 
     llm.start_profile()
     # 1ST generation (prefill instance)
-    outputs = llm.generate(
-        prompts,
-        sampling_params,
-    )
+    with record_function_or_nullcontext("e2e_llm_generate"):
+        outputs = llm.generate(
+            prompts,
+            sampling_params,
+        )
     llm.stop_profile()
 
     new_prompts = []

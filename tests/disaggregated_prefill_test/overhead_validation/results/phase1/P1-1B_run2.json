@@ -1,0 +1,16 @@
+{
+  "test_id": "P1-1B",
+  "model": "8B",
+  "model_hf_id": "meta-llama/Meta-Llama-3-8B",
+  "batch_size": 4,
+  "seq_len": 1024,
+  "profiling_enabled": false,
+  "run_index": 2,
+  "self_cpu_time_ms": 27.467,
+  "self_cuda_time_ms": 15.665,
+  "e2e_latency_ms": 58.109,
+  "total_scope_calls": 0,
+  "timestamp": "2025-12-08T15:12:20.513773",
+  "success": true,
+  "error_message": null
+}

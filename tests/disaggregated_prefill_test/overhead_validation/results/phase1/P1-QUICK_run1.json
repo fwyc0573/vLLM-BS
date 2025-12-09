@@ -1,0 +1,16 @@
+{
+  "test_id": "P1-QUICK",
+  "model": "1B",
+  "model_hf_id": "meta-llama/Llama-3.2-1B-Instruct",
+  "batch_size": 4,
+  "seq_len": 512,
+  "profiling_enabled": true,
+  "run_index": 1,
+  "self_cpu_time_ms": 25.843,
+  "self_cuda_time_ms": 3.247,
+  "e2e_latency_ms": 34.263,
+  "total_scope_calls": 181,
+  "timestamp": "2025-12-08T12:01:52.677155",
+  "success": true,
+  "error_message": null
+}

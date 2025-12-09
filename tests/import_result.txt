@@ -1,0 +1,15 @@
+=== Python and vLLM Info ===
+Date: Sat Dec  6 06:33:40 PM HKT 2025
+Python: /research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/bin/python
+
+=== pip show vllm ===
+WARNING: Package(s) not found: vllm
+
+=== Test vLLM Import ===
+Python: /research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/bin/python
+INFO 12-06 18:33:54 [__init__.py:216] Automatically detected platform cuda.
+SUCCESS: vllm imported!
+vLLM path: /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/vllm/__init__.py
+vLLM version: 0.10.3.dev0+g01efc7ef7.d20251206
+
+=== Done ===

@@ -1,0 +1,35 @@
+{
+  "test_id": "P3-B8S512B",
+  "model": "TinyLlama-1.1B",
+  "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+  "batch_size": 8,
+  "seq_len": 512,
+  "profiling_enabled": false,
+  "run_index": 1,
+  "self_cpu_time_ms": 12.568,
+  "self_cuda_time_ms": 6.89,
+  "e2e_latency_ms": 26.416,
+  "total_scope_calls": 0,
+  "scope_timings": {},
+  "category_timings": {
+    "attention": {
+      "count": 0,
+      "cpu_time_ms": 0.0
+    },
+    "mlp": {
+      "count": 0,
+      "cpu_time_ms": 0.0
+    },
+    "layernorm": {
+      "count": 0,
+      "cpu_time_ms": 0.0
+    },
+    "pipeline": {
+      "count": 0,
+      "cpu_time_ms": 0.0
+    }
+  },
+  "timestamp": "2025-12-08T22:07:25.588573",
+  "success": true,
+  "error_message": null
+}

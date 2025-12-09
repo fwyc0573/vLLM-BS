@@ -1,0 +1,2630 @@
+[
+  {
+    "test_id": "P3-B1S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 1,
+    "self_cpu_time_ms": 103.878,
+    "self_cuda_time_ms": 113.022,
+    "e2e_latency_ms": 106.636,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6327339999999995
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 99.40624700000001
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09433600000001024
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.4088940000000439
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09945599999999104
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.263217000000019
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3314880000000121
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.08889499999998952
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.7685709999999817
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.1387199999999866
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5237109999999812
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.23942399999999908
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10736000000000058
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.037407999999995806
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.021006999999997788,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.623428999999982
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.6537699999999167
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.0022789999999513
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.843484999999994
+      }
+    },
+    "timestamp": "2025-12-08T21:41:17.601928",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 2,
+    "self_cpu_time_ms": 102.871,
+    "self_cuda_time_ms": 111.961,
+    "e2e_latency_ms": 105.584,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6606700000000001
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 98.37637
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09474900000001799
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.4095030000000261
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09968000000002211
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.218482999999979
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.32883200000003854
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.08889599999999337
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.764829999999958
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.13897400000000198
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5195179999999818
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.24771100000001026
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10185499999999592
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.03718299999998999
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.021256000000008497,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.82225899999991
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.7258410000000586
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.175411999999989
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.97311500000009
+      }
+    },
+    "timestamp": "2025-12-08T21:42:55.781820",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 3,
+    "self_cpu_time_ms": 103.649,
+    "self_cuda_time_ms": 112.917,
+    "e2e_latency_ms": 106.478,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6527020000000002
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 99.149782
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09456000000000495
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.4086380000000354
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09984000000004016
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.393619999999981
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3289889999999723
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.08928099999994447
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.7652769999999873
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.13932699999997566
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5198390000000509
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2498240000000078
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10572699999999895
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.04051200000000244
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.02311500000000524,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.799249999999767
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.705197999999975
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.0533209999999382
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 5.051815000000074
+      }
+    },
+    "timestamp": "2025-12-08T21:43:43.390639",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 1,
+    "self_cpu_time_ms": 88.788,
+    "self_cuda_time_ms": 5.89,
+    "e2e_latency_ms": 99.524,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:44:39.211149",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 2,
+    "self_cpu_time_ms": 86.91,
+    "self_cuda_time_ms": 5.898,
+    "e2e_latency_ms": 100.978,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:45:26.216664",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 3,
+    "self_cpu_time_ms": 86.028,
+    "self_cuda_time_ms": 5.91,
+    "e2e_latency_ms": 96.561,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:46:06.751849",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 1,
+    "self_cpu_time_ms": 120.91,
+    "self_cuda_time_ms": 143.319,
+    "e2e_latency_ms": 123.984,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6770860000000002
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 116.30924299999998
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09427099999997153
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 12.559360000000016
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09961500000000524
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.784308999999994
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.36083199999998034
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.08921199999999953
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.7766050000000833
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.1397440000000206
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5250570000000152
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2568630000000121
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10940799999999581
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.0376310000000085
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.022902000000001862,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 5.09403100000012
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.798044000000067
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.2629500000000626
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 5.16885799999987
+      }
+    },
+    "timestamp": "2025-12-08T21:47:11.021650",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 2,
+    "self_cpu_time_ms": 117.948,
+    "self_cuda_time_ms": 139.721,
+    "e2e_latency_ms": 121.031,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6739830000000002
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 113.362965
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09423999999997613
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 11.981508999999999
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09977400000003399
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.689460999999981
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3645769999999902
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.08912200000000303
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.7778209999999963
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.13910299999994458
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5244480000000185
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.25603200000000653
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.1221429999999964
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.04057600000000093
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.02360899999999674,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 5.131147000000004
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.8232489999999526
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.2873960000000224
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 5.117197000000033
+      }
+    },
+    "timestamp": "2025-12-08T21:48:34.190825",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 3,
+    "self_cpu_time_ms": 84.972,
+    "self_cuda_time_ms": 105.479,
+    "e2e_latency_ms": 87.292,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.4241909999999998
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 81.780552
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09417599999995582
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 8.607467000000012
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09955100000001403
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 5.747057999999954
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3541430000000109
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.0893760000000184
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.7765119999999733
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.1401310000000085
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5260469999999914
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2105280000000057
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.09513499999999477
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.025152000000001864
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.017705999999991034,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 3.5749790000002615
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.0428620000000373
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 1.60624699999985
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 3.867377999999852
+      }
+    },
+    "timestamp": "2025-12-08T21:49:56.134085",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 1,
+    "self_cpu_time_ms": 78.8,
+    "self_cuda_time_ms": 6.577,
+    "e2e_latency_ms": 88.873,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:50:51.046034",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 2,
+    "self_cpu_time_ms": 83.658,
+    "self_cuda_time_ms": 6.566,
+    "e2e_latency_ms": 92.9,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:51:31.226137",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B1S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 1,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 3,
+    "self_cpu_time_ms": 102.701,
+    "self_cuda_time_ms": 6.588,
+    "e2e_latency_ms": 114.433,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:52:10.753435",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 1,
+    "self_cpu_time_ms": 86.852,
+    "self_cuda_time_ms": 96.936,
+    "e2e_latency_ms": 91.588,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.716799
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 82.17293299999999
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.0939520000000266
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5050240000000195
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.0982730000000156
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.465878999999986
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.35759700000003797
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09014400000000024
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8027510000000184
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14137800000002607
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5579819999999891
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2778549999999959
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.11705599999999686
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.04579200000000128
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.02390600000000268,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.633929999999971
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.740639999999956
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.152427999999942
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 5.018262000000009
+      }
+    },
+    "timestamp": "2025-12-08T21:53:12.254952",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 2,
+    "self_cpu_time_ms": 86.943,
+    "self_cuda_time_ms": 96.993,
+    "e2e_latency_ms": 92.196,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6797749999999997
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 82.18520699999999
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09446699999996781
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5084790000000067
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09836899999997695
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.558098999999987
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3671360000000132
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09004500000002735
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8030709999999963
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14159999999996217
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.55676800000004
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2665599999999977
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.1149439999999886
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.03852799999999115
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.023170000000012805,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.863308999999921
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.7093759999999456
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.2230750000000263
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 5.179197999999912
+      }
+    },
+    "timestamp": "2025-12-08T21:54:02.544796",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 3,
+    "self_cpu_time_ms": 84.401,
+    "self_cuda_time_ms": 94.507,
+    "e2e_latency_ms": 88.998,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.647518
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 79.94172099999999
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09379200000001583
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5084800000000396
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09827199999999721
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.360950000000041
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.36722999999998135
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.08998400000002585
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.802074999999968
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14127999999996974
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5564170000000158
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.249375
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.1075520000000106
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.051135999999998606
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.023851000000009663,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.549946000000039
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.66842800000008
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.0052189999999612
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.806679000000088
+      }
+    },
+    "timestamp": "2025-12-08T21:54:48.735814",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 1,
+    "self_cpu_time_ms": 70.611,
+    "self_cuda_time_ms": 6.502,
+    "e2e_latency_ms": 83.354,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:55:42.824179",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 2,
+    "self_cpu_time_ms": 70.421,
+    "self_cuda_time_ms": 6.52,
+    "e2e_latency_ms": 84.246,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:56:30.164616",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 3,
+    "self_cpu_time_ms": 70.463,
+    "self_cuda_time_ms": 6.515,
+    "e2e_latency_ms": 83.637,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T21:57:14.632552",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 1,
+    "self_cpu_time_ms": 40.637,
+    "self_cuda_time_ms": 62.944,
+    "e2e_latency_ms": 45.913,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6485110000000004
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 36.178485
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09539000000000851
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3312000000000062
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.1001900000000096
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.531534999999984
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.32380899999999385
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09264100000000144
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8273589999999785
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14361699999999292
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 12.522332999999996
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.29513500000000203
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10515200000000187
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.03523200000000361
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.02487199999999575,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.409853000000008
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.7776169999999762
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.004516999999969
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.81070299999998
+      }
+    },
+    "timestamp": "2025-12-08T21:58:15.110370",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 2,
+    "self_cpu_time_ms": 41.316,
+    "self_cuda_time_ms": 63.924,
+    "e2e_latency_ms": 46.592,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6746550000000007
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 36.70943799999999
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09555000000000473
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3313600000000024
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10022400000000198
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.543093999999987
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3237089999999989
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09248000000002139
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.827228000000001
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14412800000000062
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 12.942086999999985
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2887039999999979
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.1032960000000021
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.04092799999999988
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.02275800000000163,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.467520000000004
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.7525439999999834
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 1.9912030000000014
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.814704000000043
+      }
+    },
+    "timestamp": "2025-12-08T21:59:06.612631",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 3,
+    "self_cpu_time_ms": 41.649,
+    "self_cuda_time_ms": 64.392,
+    "e2e_latency_ms": 46.878,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6859189999999998
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 37.071607
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.096350000000004
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.33222300000000543
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10022200000000703
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.599156000000008
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.32406299999999827
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09219199999999364
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8247990000000281
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14377800000001117
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 12.98704700000001
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2819190000000017
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.1093440000000046
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.03612800000000425
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.021974999999998544,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.481230999999976
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.8118770000000004
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 1.98118299999997
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.819841000000063
+      }
+    },
+    "timestamp": "2025-12-08T21:59:54.646622",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 1,
+    "self_cpu_time_ms": 24.522,
+    "self_cuda_time_ms": 6.781,
+    "e2e_latency_ms": 36.899,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:01:24.662983",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 2,
+    "self_cpu_time_ms": 25.508,
+    "self_cuda_time_ms": 6.786,
+    "e2e_latency_ms": 38.348,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:02:42.625831",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B4S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 4,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 3,
+    "self_cpu_time_ms": 25.678,
+    "self_cuda_time_ms": 6.779,
+    "e2e_latency_ms": 38.581,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:03:50.843504",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 1,
+    "self_cpu_time_ms": 27.825,
+    "self_cuda_time_ms": 38.3,
+    "e2e_latency_ms": 34.215,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6754229999999989
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 23.218256999999998
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09680200000000332
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3338560000000052
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10060900000000583
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.588503
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.32496199999999226
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09369600000000537
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8279650000000002
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14476900000000387
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5827199999999993
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.28768000000000027
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.09920000000000437
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.031072000000000117
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.02277599999999802,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.3412569999999615
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.646312999999995
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 1.9095780000000013
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.744226000000038
+      }
+    },
+    "timestamp": "2025-12-08T22:04:53.860202",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 2,
+    "self_cpu_time_ms": 28.53,
+    "self_cuda_time_ms": 38.989,
+    "e2e_latency_ms": 34.932,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.7082229999999999
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 23.84825
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09696300000000338
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.33260600000000157
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10064099999999962
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.613879000000008
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.32521299999999426
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09382599999999547
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8265589999999956
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14508699999999772
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5816299999999955
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.2942719999999972
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10355099999999948
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.03235199999999895
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.023960999999995694,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.468779999999974
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.6646609999999855
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 1.9714149999999955
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.897644999999978
+      }
+    },
+    "timestamp": "2025-12-08T22:05:42.140988",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S512A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 512,
+    "profiling_enabled": true,
+    "run_index": 3,
+    "self_cpu_time_ms": 27.11,
+    "self_cuda_time_ms": 37.491,
+    "e2e_latency_ms": 33.25,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6629429999999993
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 22.63193
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09724700000000303
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3329280000000126
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10057799999999952
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 4.385944000000001
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.32460799999999107
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09372700000000077
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8288309999999892
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14467299999999705
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.5835510000000086
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.27952000000000043
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10038299999999799
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.030880000000001018
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.021061000000001513,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.234883999999973
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.604107000000007
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 1.8573519999999988
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.669178000000001
+      }
+    },
+    "timestamp": "2025-12-08T22:06:22.618908",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 1,
+    "self_cpu_time_ms": 12.568,
+    "self_cuda_time_ms": 6.89,
+    "e2e_latency_ms": 26.416,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:07:25.588573",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 2,
+    "self_cpu_time_ms": 8.553,
+    "self_cuda_time_ms": 6.896,
+    "e2e_latency_ms": 18.384,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:08:18.497482",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S512B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 512,
+    "profiling_enabled": false,
+    "run_index": 3,
+    "self_cpu_time_ms": 12.412,
+    "self_cuda_time_ms": 6.884,
+    "e2e_latency_ms": 25.902,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:09:05.642035",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 1,
+    "self_cpu_time_ms": 52.412,
+    "self_cuda_time_ms": 85.5,
+    "e2e_latency_ms": 60.494,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 1.0932459999999993
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 47.396675
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.0962880000000041
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.33631799999998657
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10127800000001298
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 14.227491000000025
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.33126400000000283
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09478400000001057
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8367649999999703
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14601699999999618
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 12.802664000000004
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.3071999999999971
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10742399999999906
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.03372699999999895
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.02382300000000396,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.837022999999975
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.7215660000000064
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.0159039999999875
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 5.1595280000000185
+      }
+    },
+    "timestamp": "2025-12-08T22:10:06.609674",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 2,
+    "self_cpu_time_ms": 50.712,
+    "self_cuda_time_ms": 83.258,
+    "e2e_latency_ms": 58.707,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 1.0141099999999987
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 45.964451000000004
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09654300000001785
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.3367029999999941
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10109199999999145
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 13.887233999999983
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.33106900000000317
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09452699999998732
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8361879999999983
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14473799999999393
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 12.447558999999998
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.29571199999999953
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.10240000000000146
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.03337599999999657
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.021822000000000116,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 4.715690999999976
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 2.6849160000000265
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 2.002598999999973
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 4.992159999999975
+      }
+    },
+    "timestamp": "2025-12-08T22:10:52.918092",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S1024A",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 1024,
+    "profiling_enabled": true,
+    "run_index": 3,
+    "self_cpu_time_ms": 34.333,
+    "self_cuda_time_ms": 59.52,
+    "e2e_latency_ms": 40.422,
+    "total_scope_calls": 29,
+    "scope_timings": {
+      "Preprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.6739189999999998
+      },
+      "Forward": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 31.05184
+      },
+      "input_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09616099999997277
+      },
+      "attn_pre_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.33660799999998015
+      },
+      "attn_rope": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.10131200000000536
+      },
+      "attn": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 9.294891
+      },
+      "attn_post_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.33155000000001017
+      },
+      "post_attention_layernorm": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.09468699999998899
+      },
+      "mlp_up_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.8382090000000008
+      },
+      "mlp_act": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 0.14591800000001057
+      },
+      "mlp_down_proj": {
+        "cpu_time_ms": 0.0,
+        "count": 22,
+        "cuda_time_ms": 8.665998999999996
+      },
+      "Postprocess": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.21574399999999877
+      },
+      "Sample": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.072
+      },
+      "Bookkeep": {
+        "cpu_time_ms": 0.0,
+        "count": 1,
+        "cuda_time_ms": 0.021888000000006288
+      },
+      "EPLB": {
+        "cpu_time_ms": 0.01640899999999965,
+        "count": 1,
+        "cuda_time_ms": 0.0
+      }
+    },
+    "category_timings": {
+      "attention": {
+        "count": 176,
+        "cpu_time_ms": 3.275113999999985
+      },
+      "mlp": {
+        "count": 132,
+        "cpu_time_ms": 1.9566270000000512
+      },
+      "layernorm": {
+        "count": 88,
+        "cpu_time_ms": 1.3808329999999713
+      },
+      "pipeline": {
+        "count": 11,
+        "cpu_time_ms": 3.554789999999992
+      }
+    },
+    "timestamp": "2025-12-08T22:11:35.472863",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 1,
+    "self_cpu_time_ms": 35.833,
+    "self_cuda_time_ms": 7.648,
+    "e2e_latency_ms": 51.719,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:12:34.090041",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 2,
+    "self_cpu_time_ms": 35.037,
+    "self_cuda_time_ms": 7.647,
+    "e2e_latency_ms": 51.064,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:13:39.394073",
+    "success": true,
+    "error_message": null
+  },
+  {
+    "test_id": "P3-B8S1024B",
+    "model": "TinyLlama-1.1B",
+    "model_hf_id": "TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+    "batch_size": 8,
+    "seq_len": 1024,
+    "profiling_enabled": false,
+    "run_index": 3,
+    "self_cpu_time_ms": 36.111,
+    "self_cuda_time_ms": 7.65,
+    "e2e_latency_ms": 52.486,
+    "total_scope_calls": 0,
+    "scope_timings": {},
+    "category_timings": {
+      "attention": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "mlp": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "layernorm": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      },
+      "pipeline": {
+        "count": 0,
+        "cpu_time_ms": 0.0
+      }
+    },
+    "timestamp": "2025-12-08T22:14:55.426757",
+    "success": true,
+    "error_message": null
+  }
+]

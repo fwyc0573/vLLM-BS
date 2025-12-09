@@ -40,6 +40,7 @@ from vllm.v1.attention.backends.utils import (AttentionCGSupport,
                                               split_decodes_and_prefills)
 # yapf: enable
 from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.utils import record_function_or_nullcontext
 
 FLASHINFER_WORKSPACE_BUFFER_SIZE = 256 * 1024 * 1024
 
@@ -795,16 +796,17 @@ class FlashInferImpl(AttentionImpl):
             # and value[:num_actual_tokens] because the reshape_and_cache_flash
             # op uses the slot_mapping's shape to determine the number of
             # actual tokens.
-            torch.ops._C_cache_ops.reshape_and_cache_flash(
-                key,
-                value,
-                kv_cache[:, 0],
-                kv_cache[:, 1],
-                attn_metadata.slot_mapping,
-                self.kv_cache_dtype,
-                layer._k_scale,
-                layer._v_scale,
-            )
+            with record_function_or_nullcontext("attn_kv_cache_save"):
+                torch.ops._C_cache_ops.reshape_and_cache_flash(
+                    key,
+                    value,
+                    kv_cache[:, 0],
+                    kv_cache[:, 1],
+                    attn_metadata.slot_mapping,
+                    self.kv_cache_dtype,
+                    layer._k_scale,
+                    layer._v_scale,
+                )
 
             # The FlashInfer api requires data to be in fp8_e4m3 or fp8_e5m2
             # to process the cache when the kv_cache_dtype is fp8
@@ -844,13 +846,14 @@ class FlashInferImpl(AttentionImpl):
                 assert prefill_wrapper._logits_soft_cap == (
                     self.logits_soft_cap or 0.0)
                 assert prefill_wrapper._sm_scale == self.scale
-                prefill_wrapper.run(
-                    prefill_query,
-                    kv_cache_permute,
-                    k_scale=layer._k_scale_float,
-                    v_scale=layer._v_scale_float,
-                    out=output[num_decode_tokens:],
-                )
+                with record_function_or_nullcontext("attn_prefill"):
+                    prefill_wrapper.run(
+                        prefill_query,
+                        kv_cache_permute,
+                        k_scale=layer._k_scale_float,
+                        v_scale=layer._v_scale_float,
+                        out=output[num_decode_tokens:],
+                    )
             else:
                 # prefill_query may be non-contiguous
                 prefill_query = prefill_query.contiguous()
@@ -895,24 +898,25 @@ class FlashInferImpl(AttentionImpl):
                     mock_kv_cache = kv_cache_permute
                     mock_block_table = block_tables_prefill
 
-                trtllm_batch_context_with_kv_cache(
-                    query=prefill_query,
-                    kv_cache=mock_kv_cache,
-                    workspace_buffer=workspace_buffer,
-                    block_tables=mock_block_table,
-                    seq_lens=seq_lens_prefill,
-                    max_q_len=attn_metadata.max_q_len,
-                    max_kv_len=attn_metadata.max_seq_len,
-                    bmm1_scale=self.bmm1_scale,
-                    bmm2_scale=self.bmm2_scale,
-                    batch_size=attn_metadata.num_prefills,
-                    cum_seq_lens_q=attn_metadata.qo_indptr_gpu,
-                    cum_seq_lens_kv=attn_metadata.paged_kv_indptr_gpu,
-                    window_left=self.window_left,
-                    sinks=self.sinks,
-                    o_sf_scale=self.o_sf_scale,
-                    out=out,
-                )
+                with record_function_or_nullcontext("attn_prefill"):
+                    trtllm_batch_context_with_kv_cache(
+                        query=prefill_query,
+                        kv_cache=mock_kv_cache,
+                        workspace_buffer=workspace_buffer,
+                        block_tables=mock_block_table,
+                        seq_lens=seq_lens_prefill,
+                        max_q_len=attn_metadata.max_q_len,
+                        max_kv_len=attn_metadata.max_seq_len,
+                        bmm1_scale=self.bmm1_scale,
+                        bmm2_scale=self.bmm2_scale,
+                        batch_size=attn_metadata.num_prefills,
+                        cum_seq_lens_q=attn_metadata.qo_indptr_gpu,
+                        cum_seq_lens_kv=attn_metadata.paged_kv_indptr_gpu,
+                        window_left=self.window_left,
+                        sinks=self.sinks,
+                        o_sf_scale=self.o_sf_scale,
+                        out=out,
+                    )
 
         if num_decode_tokens > 0:
             decode_wrapper = attn_metadata.decode_wrapper
@@ -925,13 +929,14 @@ class FlashInferImpl(AttentionImpl):
                 assert decode_wrapper._logits_soft_cap == (self.logits_soft_cap
                                                            or 0.0)
                 assert decode_wrapper._sm_scale == self.scale
-                decode_wrapper.run(
-                    decode_query,
-                    kv_cache_permute,
-                    k_scale=layer._k_scale_float,
-                    v_scale=layer._v_scale_float,
-                    out=output[:num_decode_tokens],
-                )
+                with record_function_or_nullcontext("attn_decode"):
+                    decode_wrapper.run(
+                        decode_query,
+                        kv_cache_permute,
+                        k_scale=layer._k_scale_float,
+                        v_scale=layer._v_scale_float,
+                        out=output[:num_decode_tokens],
+                    )
             else:
                 # decode_query may be non-contiguous
                 decode_query = decode_query.contiguous()
@@ -958,20 +963,21 @@ class FlashInferImpl(AttentionImpl):
                     assert self.o_sf_scale is None
                     out = output[:num_decode_tokens]
 
-                trtllm_batch_decode_with_kv_cache(
-                    query=decode_query,
-                    kv_cache=kv_cache_permute,
-                    workspace_buffer=workspace_buffer,
-                    block_tables=block_tables_decode,
-                    seq_lens=seq_lens_decode,
-                    max_seq_len=attn_metadata.max_seq_len,
-                    bmm1_scale=self.bmm1_scale,
-                    bmm2_scale=self.bmm2_scale,
-                    window_left=self.window_left,
-                    sinks=self.sinks,
-                    o_sf_scale=self.o_sf_scale,
-                    out=out,
-                )
+                with record_function_or_nullcontext("attn_decode"):
+                    trtllm_batch_decode_with_kv_cache(
+                        query=decode_query,
+                        kv_cache=kv_cache_permute,
+                        workspace_buffer=workspace_buffer,
+                        block_tables=block_tables_decode,
+                        seq_lens=seq_lens_decode,
+                        max_seq_len=attn_metadata.max_seq_len,
+                        bmm1_scale=self.bmm1_scale,
+                        bmm2_scale=self.bmm2_scale,
+                        window_left=self.window_left,
+                        sinks=self.sinks,
+                        o_sf_scale=self.o_sf_scale,
+                        out=out,
+                    )
         return output_padded
 
 
