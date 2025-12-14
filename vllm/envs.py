@@ -129,6 +129,11 @@ if TYPE_CHECKING:
     VLLM_MXFP4_USE_MARLIN: Optional[bool] = None
     VLLM_V0_USE_OUTLINES_CACHE: bool = False
     VLLM_V1_USE_OUTLINES_CACHE: bool = False
+    # V1 generate defaults (controlled by shell via env vars).
+    # NOTE: V1 generate currently requires chunked prefill. If disabled, vLLM
+    # will raise an error during initialization (fail fast).
+    VLLM_V1_ENABLE_CHUNKED_PREFILL: bool = True
+    VLLM_V1_ENABLE_PREFIX_CACHING: bool = True
     VLLM_TPU_BUCKET_PADDING_GAP: int = 0
     VLLM_TPU_MOST_MODEL_LEN: Optional[int] = None
     VLLM_TPU_USING_PATHWAYS: bool = False
@@ -750,6 +755,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # If set, use the V1 code path.
     "VLLM_USE_V1":
     lambda: bool(int(os.getenv("VLLM_USE_V1", "1"))),
+
+    # V1 generate defaults (controlled by shell via env vars).
+    "VLLM_V1_ENABLE_CHUNKED_PREFILL":
+    lambda: bool(int(os.getenv("VLLM_V1_ENABLE_CHUNKED_PREFILL", "1"))),
+    "VLLM_V1_ENABLE_PREFIX_CACHING":
+    lambda: bool(int(os.getenv("VLLM_V1_ENABLE_PREFIX_CACHING", "1"))),
 
     # Disable aiter ops unless specifically enabled.
     # Acts as a parent switch to enable the rest of the other operations.

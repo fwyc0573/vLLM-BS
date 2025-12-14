@@ -14,6 +14,7 @@ from vllm.distributed.kv_transfer.kv_connector.v1.p2p.p2p_nccl_engine import (
     P2pNcclEngine)
 from vllm.distributed.parallel_state import get_world_group
 from vllm.logger import init_logger
+from vllm.utils import get_ip
 from vllm.v1.attention.backends.mla.common import MLACommonMetadata
 from vllm.v1.core.sched.output import SchedulerOutput
 
@@ -79,11 +80,17 @@ class P2pNcclConnector(KVConnectorBase_V1):
         self._local_rank = get_world_group().local_rank \
             if role == KVConnectorRole.WORKER else 0
 
+        # Use the configured kv_rank (producer/consumer rank) to offset ports;
+        # fall back to world rank when kv_rank is unset to preserve prior
+        # behavior. This avoids port collisions when multiple connector
+        # instances run in the same host.
+        port_offset = self.config.kv_rank if self.config.kv_rank is not None \
+            else self._rank
         self.p2p_nccl_engine = P2pNcclEngine(
             local_rank=self._local_rank,
             config=self.config,
             hostname="",
-            port_offset=self._rank,
+            port_offset=port_offset,
         ) if role == KVConnectorRole.WORKER else None
 
     # ==============================
@@ -264,7 +271,18 @@ class P2pNcclConnector(KVConnectorBase_V1):
         assert isinstance(connector_metadata, P2pNcclConnectorMetadata)
         for request in connector_metadata.requests:
             request_id = request.request_id
-            ip, port = self.parse_request_id(request_id, True)
+            try:
+                ip, port = self.parse_request_id(request_id, True)
+            except ValueError:
+                # Offline examples do not embed host/port in request ids.
+                # Fall back to the configured KV IP/port with a simple
+                # round-robin on kv_rank.
+                base_ip = self.config.kv_ip or get_ip()
+                base_port = int(self.config.kv_port)
+                peer_rank = (self.config.kv_rank + 1) % max(
+                    1, int(self.config.kv_parallel_size))
+                ip, port = base_ip, base_port + peer_rank
+
             remote_address = ip + ":" + str(port + self._rank)
 
             kv_cache = extract_kv_from_layer(kv_layer, request.block_ids)

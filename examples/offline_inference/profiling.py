@@ -281,7 +281,15 @@ def run_profile(
 
     decode_profs = []
     for _ in tqdm.tqdm(range(num_steps_to_profile - 1)):
-        num_running_seqs = llm.llm_engine.scheduler[0].get_num_unfinished_seq_groups()
+        # V1 LLMEngine does not expose scheduler; fall back to unfinished
+        # request count when scheduler is absent (V0).
+        if hasattr(llm.llm_engine, "scheduler"):
+            num_running_seqs = llm.llm_engine.scheduler[0].get_num_unfinished_seq_groups()
+        elif hasattr(llm.llm_engine, "get_num_unfinished_requests"):
+            num_running_seqs = llm.llm_engine.get_num_unfinished_requests()
+        else:
+            num_running_seqs = None
+
         with layerwise_profile(num_running_seqs=num_running_seqs) as decode_prof:
             llm.llm_engine.step()
         decode_profs.append(decode_prof)
@@ -371,7 +379,8 @@ def run_profile(
             json_output if json_output.endswith(".json") else json_output + ".json"
         )
         with open(json_output_file, "w+") as f:
-            json.dump(json_dict, f, indent=2)
+            # Some engine args contain enums (e.g., LogprobsMode); default=str keeps them JSON-serializable.
+            json.dump(json_dict, f, indent=2, default=str)
         pass
 
     if context.save_chrome_traces_folder is not None:
@@ -397,7 +406,7 @@ Profile a model
     example:
     ```
     python examples/offline_inference/profiling.py \\
-        --model neuralmagic/Meta-Llama-3.1-8B-Instruct-FP8 --batch-size 4 \\
+        --model unsloth/Llama-3.2-1B-Instruct --batch-size 4 \\
         --prompt-len 512 --max-num-batched-tokens 8196 --json Llama31-8b-FP8 \\
         --enforce-eager run_num_steps -n 2
     ```

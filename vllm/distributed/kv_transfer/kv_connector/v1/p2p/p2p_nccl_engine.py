@@ -79,7 +79,7 @@ class P2pNcclEngine:
         self.nccl = NCCLLibrary(library_path)
 
         if not hostname:
-            hostname = get_ip()
+            hostname = self.config.kv_ip or get_ip()
         port = int(self.config.kv_port) + port_offset
         if port == 0:
             raise ValueError("Port cannot be 0")
@@ -90,9 +90,13 @@ class P2pNcclEngine:
         self.zmq_address = f"{self._hostname}:{self._port}"
 
         # The `http_port` must be consistent with the port of OpenAI.
-        self.http_address = (
-            f"{self._hostname}:"
-            f"{self.config.kv_connector_extra_config['http_port']}")
+        # Default to kv_port when the caller does not provide an explicit
+        # `http_port` in kv_connector_extra_config to keep the example usable
+        # out of the box.
+        http_port = int(
+            self.config.get_from_extra_config("http_port",
+                                               self.config.kv_port))
+        self.http_address = f"{self._hostname}:{http_port}"
 
         # If `proxy_ip` or `proxy_port` is `""`,
         # then the ping thread will not be enabled.

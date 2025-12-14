@@ -1616,13 +1616,21 @@ class EngineArgs:
                              model_config: ModelConfig) -> None:
         """Set Default Arguments for V1 Engine."""
 
-        # V1 always uses chunked prefills and prefix caching
-        # for non-pooling tasks.
-        # For pooling tasks the default is False
+        # V1 generate defaults are controlled via environment variables to
+        # allow experiment scripts (e.g. shell launchers) to set a consistent
+        # runtime configuration.
+        # NOTE: V1 generate currently requires chunked prefill. Disabling it
+        # will raise an error (fail fast).
+        # For pooling tasks the default can be False.
         if model_config.runner_type != "pooling":
-            self.enable_chunked_prefill = True
+            if self.enable_chunked_prefill is None:
+                self.enable_chunked_prefill = envs.VLLM_V1_ENABLE_CHUNKED_PREFILL
+            if not self.enable_chunked_prefill:
+                raise ValueError(
+                    "V1 generate requires chunked prefill. Please set "
+                    "VLLM_V1_ENABLE_CHUNKED_PREFILL=1.")
             if self.enable_prefix_caching is None:
-                self.enable_prefix_caching = True
+                self.enable_prefix_caching = envs.VLLM_V1_ENABLE_PREFIX_CACHING
         else:
 
             pooling_type = model_config.pooler_config.pooling_type

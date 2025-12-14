@@ -8,6 +8,7 @@ from contextlib import ExitStack
 from typing import Any, Callable, Optional
 from unittest.mock import patch
 
+import filelock
 import torch
 import torch._inductor.compile_fx
 import torch.fx as fx
@@ -214,7 +215,15 @@ class InductorStandaloneAdaptor(CompilerInterface):
         assert key is not None
         path = os.path.join(self.cache_dir, key)
         if not envs.VLLM_DISABLE_COMPILE_CACHE:
-            compiled_graph.save(path=path, format="unpacked")
+            # Multiple vLLM engines may be launched concurrently in separate
+            # processes (e.g. disaggregated prefill/decode) and share the same
+            # torch.compile cache directory (rank_0_0/backbone). Guard the save
+            # step to avoid concurrent cache population races inside PyTorch.
+            lock_name = hashlib.sha256(path.encode()).hexdigest() + ".lock"
+            lock_path = os.path.join(self.cache_dir, lock_name)
+            lock = filelock.FileLock(lock_path, mode=0o666)
+            with lock:
+                compiled_graph.save(path=path, format="unpacked")
             compilation_counter.num_compiled_artifacts_saved += 1
         return compiled_graph, (key, path)
 
