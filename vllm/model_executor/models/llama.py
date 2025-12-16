@@ -95,10 +95,13 @@ class LlamaMLP(nn.Module):
     def forward(self, x):
         with record_function_or_nullcontext("mlp_up_proj"):
             x, _ = self.gate_up_proj(x)
+        # print(f"mlp_up_proj: {x}")
         with record_function_or_nullcontext("mlp_act"):
             x = self.act_fn(x)
+        # print(f"mlp_act: {x.shape}")
         with record_function_or_nullcontext("mlp_down_proj"):
             x, _ = self.down_proj(x)
+        # print(f"mlp_down_proj: {x}")
         return x
 
 

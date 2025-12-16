@@ -124,6 +124,7 @@ def _wait_for_file(path: str, timeout_s: float) -> None:
 
 def run_prefill(args: argparse.Namespace):
     _validate_runtime_env(args)
+    import torch
     from vllm import LLM, SamplingParams
     from vllm.config import KVTransferConfig
     from vllm.v1.utils import record_function_or_nullcontext
@@ -154,7 +155,7 @@ def run_prefill(args: argparse.Namespace):
         model=args.model,
         kv_transfer_config=ktc,
         gpu_memory_utilization=args.gpu_memory_utilization,
-        enforce_eager=True,
+        enforce_eager=False,
     )
 
     for _ in range(args.warmup_iters):
@@ -162,10 +163,16 @@ def run_prefill(args: argparse.Namespace):
     if args.profile:
         llm.start_profile()
     with record_function_or_nullcontext("e2e_llm_generate_prefill"):
+        wall_start = time.perf_counter()
         llm.generate(prompts, sampling_params)
+        torch.cuda.synchronize()  # Ensure all GPU operations complete
+        wall_end = time.perf_counter()
     if args.profile:
         llm.stop_profile()
-    print("Prefill node is finished.")
+    prefill_wall_time = wall_end - wall_start
+    print(f"[PREFILL] Total generation wall-clock time: {prefill_wall_time:.6f} seconds",
+          flush=True)
+    print("Prefill node is finished.", flush=True)
     if os.path.exists(args.sync_file):
         raise RuntimeError(
             f"Sync file already exists: {args.sync_file}. Please remove it "
@@ -184,6 +191,7 @@ def run_prefill(args: argparse.Namespace):
 
 def run_decode(args: argparse.Namespace):
     _validate_runtime_env(args)
+    import torch
     from vllm import LLM, SamplingParams
     from vllm.config import KVTransferConfig
     from vllm.v1.utils import record_function_or_nullcontext
@@ -244,9 +252,15 @@ def run_decode(args: argparse.Namespace):
     if args.profile:
         llm.start_profile()
     with record_function_or_nullcontext("e2e_llm_generate_decode"):
+        wall_start = time.perf_counter()
         outputs = llm.generate(prompts, sampling_params)
+        torch.cuda.synchronize()  # Ensure all GPU operations complete
+        wall_end = time.perf_counter()
     if args.profile:
         llm.stop_profile()
+    decode_wall_time = wall_end - wall_start
+    print(f"[DECODE] Total generation wall-clock time: {decode_wall_time:.6f} seconds",
+          flush=True)
     for output in outputs:
         prompt = output.prompt
         generated_text = output.outputs[0].text

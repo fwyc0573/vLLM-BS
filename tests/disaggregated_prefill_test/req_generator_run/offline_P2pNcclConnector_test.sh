@@ -13,8 +13,8 @@
 #   ./offline_P2pNcclConnector_test.sh --profile      # Enable profiling
 #   ./offline_P2pNcclConnector_test.sh --num-requests 8 --prefill-tokens 512
 #   ./offline_P2pNcclConnector_test.sh --profile --profile-max-decode-tokens 256
-#   tests/disaggregated_prefill_test/req_generator_run/offline_P2pNcclConnector_test.sh --profile --gpu-prefill 6 --gpu-decode 7
-#
+#   tests/disaggregated_prefill_test/req_generator_run/offline_P2pNcclConnector_test.sh --profile --gpu-prefill 1 --gpu-decode 2
+#   tests/disaggregated_prefill_test/req_generator_run/offline_P2pNcclConnector_test.sh --gpu-prefill 1 --gpu-decode 2
 # Environment Variables:
 #   GPU_PREFILL - GPU for prefill node (default: 6)
 #   GPU_DECODE  - GPU for decode node (default: 7)
@@ -37,9 +37,9 @@ EXAMPLE_DIR="$PROJECT_ROOT/examples/offline_inference"
 OUTPUT_LOG="$SCRIPT_DIR/p2p_nccl_connector_test_output.log"
 
 # Default parameters (can be overridden via command line or environment variables)
-NUM_REQUESTS=${NUM_REQUESTS:-4}
-PREFILL_TOKENS=${PREFILL_TOKENS:-1024}
-DECODE_TOKENS=${DECODE_TOKENS:-512}
+NUM_REQUESTS=${NUM_REQUESTS:-128}
+PREFILL_TOKENS=${PREFILL_TOKENS:-512}
+DECODE_TOKENS=${DECODE_TOKENS:-2}
 SEED=${SEED:-42}
 WARMUP_ITERS=${WARMUP_ITERS:-3}
 ENABLE_PROFILE=${ENABLE_PROFILE:-0}

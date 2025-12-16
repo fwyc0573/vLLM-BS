@@ -224,3 +224,9 @@ ep_kernels_workspace/
 
 *.safetensors
 *.gz
+*.json
+.vllm_config/*
+.flashinfer_cache/*
+profiles/*
+.cursor
+tests/profile/*
