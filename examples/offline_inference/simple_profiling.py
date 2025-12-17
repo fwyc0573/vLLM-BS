@@ -96,7 +96,7 @@ def main():
     llm = LLM(
         model=args.model,
         tensor_parallel_size=1,
-        enforce_eager=False,
+        enforce_eager=True,
         gpu_memory_utilization=args.gpu_memory_utilization,
     )
 

@@ -3,8 +3,8 @@
 # Requirements:
 #   - Single GPU (default: GPU 0)
 #   - Conda env: vllm-bs-0.10.2
-# tests/monolithic/offline_monolithic_profiling.sh --profile --model unsloth/Llama-3.2-1B-Instruct --gpu 1
-# tests/monolithic/offline_monolithic_profiling.sh --model unsloth/Llama-3.2-1B-Instruct --gpu 1
+# tests/monolithic/offline_monolithic_profiling.sh --profile --model unsloth/Llama-3.2-1B-Instruct --gpu 7
+# tests/monolithic/offline_monolithic_profiling.sh --model unsloth/Llama-3.2-1B-Instruct --gpu 7
 
 set -euo pipefail
 
@@ -20,15 +20,15 @@ OUTPUT_LOG="$SCRIPT_DIR/offline_monolithic_profiling.log"
 # Defaults (overridable via env or CLI)
 # -----------------------------------------------------------------------------
 GPU_ID=${GPU_ID:-1}
-NUM_REQUESTS=${NUM_REQUESTS:-4}
-PREFILL_TOKENS=${PREFILL_TOKENS:-512}
+NUM_REQUESTS=${NUM_REQUESTS:-1}
+PREFILL_TOKENS=${PREFILL_TOKENS:-4096}
 DECODE_TOKENS=${DECODE_TOKENS:-2}
 SEED=${SEED:-42}
 WARMUP_ITERS=${WARMUP_ITERS:-3}
 ENABLE_PROFILE=${ENABLE_PROFILE:-0}
 PROFILE_MAX_DECODE_TOKENS=${PROFILE_MAX_DECODE_TOKENS:-256}
 MODEL=${MODEL:-"unsloth/Llama-3.2-1B-Instruct"}
-GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.7}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8}
 
 # -----------------------------------------------------------------------------
 # CLI parsing (mirrors reference script flags where applicable)
@@ -65,7 +65,7 @@ export VLLM_V1_ENABLE_PREFIX_CACHING=0
 if [[ $ENABLE_PROFILE -eq 1 ]]; then
     export VLLM_TORCH_PROFILER_DIR="$SCRIPT_DIR/profiles"
     export VLLM_TORCH_PROFILER_WITH_STACK=0
-    export VLLM_CUSTOM_SCOPES_FOR_PROFILING=0
+    export VLLM_CUSTOM_SCOPES_FOR_PROFILING=1
     # # ban torch.compile for profiling
     # export VLLM_TORCH_COMPILE_LEVEL=1
     mkdir -p "$VLLM_TORCH_PROFILER_DIR"

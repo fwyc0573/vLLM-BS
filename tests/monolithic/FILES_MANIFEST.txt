@@ -1,0 +1,145 @@
+# MLP Predictor 误差分析工具集 - 文件清单
+# 生成日期: 2025-12-16
+
+## 核心脚本 (Python)
+
+1. trace_mlp_error.py (7.6K)
+   - 功能: 从单个 PyTorch profiler trace 拆分 PREFILL/DECODE，计算 MLP op 误差
+   - 用法: python trace_mlp_error.py --trace <trace.json.gz> [--pred-json preds.json] [--csv-out out.csv]
+   - 输出: 表格 (stdout) + 可选 CSV
+   - 依赖: Python 3.9+, no external deps (json, gzip, dataclasses built-in)
+
+2. batch_calibrate_mlp.py (4.6K)
+   - 功能: 批量处理多个 traces，聚合误差统计
+   - 用法: python batch_calibrate_mlp.py [--trace-dir profiles] [--pred-json preds.json] [--output-csv out.csv]
+   - 输出: 聚合表格 + TOP-5 worst cases + CSV
+   - 依赖: pandas, subprocess (pandas 需单独 pip install)
+
+## 文档 (Markdown)
+
+3. README_TRACE_MLP_ERROR.md (7.0K)
+   - 详细使用指南，包括:
+     - 快速开始
+     - 自定义预测值格式
+     - 输出列说明
+     - 故障排除
+     - 集成到 calibration 流程的示例
+
+4. CALIBRATION_WORKFLOW.md (7.2K)
+   - 完整校准工作流 (3 阶段):
+     1. 数据采集 (profiler)
+     2. 误差分析 (拆分 phase)
+     3. 迭代优化 (修改 predictor)
+   - 包含当前误差汇总表和优化建议
+
+5. ANALYSIS_SUMMARY.md (8.8K)
+   - 执行总结报告，包括:
+     - 测试配置
+     - 核心发现 (按 op/phase 分类)
+     - 语义一致性验证
+     - 根因分析
+     - 建议的后续步骤 (P0/P1/P2)
+     - 快速参考和预期对标
+
+6. FILES_MANIFEST.txt (本文件)
+   - 所有文件的说明和使用指南
+
+## 预期输出文件 (生成时)
+
+- /tmp/mlp_calibration_errors.csv - 单 trace 误差表
+- /tmp/calibration_summary.csv - 批量聚合误差表
+- /tmp/custom_calibration.csv - 自定义预测的误差表
+
+## 数据来源
+
+### Trace 文件
+- tests/monolithic/profiles/*.pt.trace.json.gz
+- 由 offline_monolithic_profiling.sh 生成
+- 当前样本: 5 个 traces (2 个有效)
+
+### Profiler Log
+- tests/monolithic/offline_monolithic_profiling.log
+- PyTorch profiler 的 key_averages() 输出 (聚合表)
+- 注意: 该表跨 phase 聚合，需用 trace 拆分才能得到 phase-specific 数据
+
+## 快速入门 (3 步)
+
+### Step 1: 验证脚本
+python tests/monolithic/trace_mlp_error.py \
+  --trace tests/monolithic/profiles/proj186_1427354.1765880405044290957.pt.trace.json.gz
+
+### Step 2: 批量分析
+python tests/monolithic/batch_calibrate_mlp.py \
+  --trace-dir tests/monolithic/profiles \
+  --output-csv /tmp/results.csv
+
+### Step 3: 查看结果
+cat /tmp/results.csv | head -20
+
+## 主要发现 (2025-12-16 数据)
+
+### PREFILL Phase (M~4096)
+- mlp_up_proj: -86.68% (严重 underpredict) ← 需要修复！
+- mlp_down_proj: -82.61% (严重 underpredict) ← 需要修复！
+- mlp_act: -73.87% (严重 underpredict) ← 需要修复！
+- post_attention_layernorm: -1.48% (准确) ✓
+
+### DECODE Phase (M=8)
+- post_attention_layernorm: +526.02% (严重 overpredict) ← 需要修复！
+- mlp_act: +55.17% (适度高估)
+- mlp_up_proj: +1.14% (准确) ✓
+- mlp_down_proj: -1.48% (准确) ✓
+
+### 推荐修复方向
+1. 检查 predictor 中 mlp_up_proj 是否用了正确的 output 维度 (2*intermediate_size vs intermediate_size)
+2. 为 LayerNorm 在小 M 时添加 overhead 项（而不是简单线性外推）
+3. 用多个配置重新采样和训练
+
+## 文件依赖关系
+
+trace_mlp_error.py (独立)
+   ↓ 产生
+   - CSV 输出
+   - 表格 stdout
+
+batch_calibrate_mlp.py (调用 trace_mlp_error.py)
+   ↓ 产生
+   - 聚合 CSV
+   - 统计摘要
+
+文档: README / WORKFLOW / ANALYSIS_SUMMARY (参考性，无代码依赖)
+
+## 环境要求
+
+- Python 3.9+
+- pandas (仅 batch_calibrate_mlp.py 需要)
+- 无其他外部依赖
+
+安装 pandas:
+  pip install pandas
+
+## 已验证的使用场景
+
+✅ 单 trace 分析
+✅ 多 trace 聚合 (4/5 有效)
+✅ 自定义预测值导入
+✅ CSV 导出
+✅ 缺失 Forward 事件处理 (警告而非错误)
+
+## 已知问题
+
+❌ 40% trace 有效率（1 个无 Forward 事件，2 个零时间数据）
+  → 可能是 profiler 配置问题，需改进
+❌ 某些 trace 中部分 op actual_ms = 0
+  → 需用 Nsight 验证这些 op 是否真的没有执行
+
+## 后续工作
+
+- 改进 profiler trace 采集逻辑
+- 在 5+ 不同配置上重新采集数据
+- 实现 predictor 的多模型/分段优化
+- 集成到 CI pipeline
+
+---
+生成: 2025-12-16
+维护者: Yicheng (based on analysis framework)
