@@ -49,6 +49,7 @@ from vllm.model_executor.model_loader.weight_utils import (
     default_weight_loader, maybe_remap_kv_scale_name)
 from vllm.model_executor.sampling_metadata import SamplingMetadata
 from vllm.sequence import IntermediateTensors
+from vllm.v1.utils import record_function_or_nullcontext
 
 from .interfaces import SupportsLoRA, SupportsPP
 from .utils import (AutoWeightsLoader, is_pp_missing_parameter,
@@ -287,7 +288,8 @@ class PhiMoE(nn.Module):
         orig_shape = hidden_states.shape
         hidden_states = hidden_states.view(-1, self.hidden_size)
         # router_logits: (num_tokens, n_experts)
-        router_logits, _ = self.gate(hidden_states)
+        with record_function_or_nullcontext("moe_gating"):
+            router_logits, _ = self.gate(hidden_states)
         final_hidden_states = self.experts(hidden_states, router_logits)
         return final_hidden_states.view(orig_shape)
 

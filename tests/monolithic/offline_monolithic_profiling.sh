@@ -5,7 +5,7 @@
 #   - Conda env: vllm-bs-0.10.2
 # tests/monolithic/offline_monolithic_profiling.sh --profile --model unsloth/Llama-3.2-1B-Instruct --gpu 7
 # tests/monolithic/offline_monolithic_profiling.sh --model unsloth/Llama-3.2-1B-Instruct --gpu 7
-
+# tests/monolithic/offline_monolithic_profiling.sh --profile --model microsoft/Phi-tiny-MoE-instruct --gpu 7
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
@@ -19,6 +19,9 @@ OUTPUT_LOG="$SCRIPT_DIR/offline_monolithic_profiling.log"
 # -----------------------------------------------------------------------------
 # Defaults (overridable via env or CLI)
 # -----------------------------------------------------------------------------
+export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 # 允许突破原来model的max_model_len限制
+
+
 GPU_ID=${GPU_ID:-1}
 NUM_REQUESTS=${NUM_REQUESTS:-1}
 PREFILL_TOKENS=${PREFILL_TOKENS:-4096}
@@ -27,7 +30,9 @@ SEED=${SEED:-42}
 WARMUP_ITERS=${WARMUP_ITERS:-3}
 ENABLE_PROFILE=${ENABLE_PROFILE:-0}
 PROFILE_MAX_DECODE_TOKENS=${PROFILE_MAX_DECODE_TOKENS:-256}
-MODEL=${MODEL:-"unsloth/Llama-3.2-1B-Instruct"}
+# microsoft/Phi-tiny-MoE-instruct
+# unsloth/Llama-3.2-1B-Instruct
+MODEL=${MODEL:-"microsoft/Phi-tiny-MoE-instruct"}
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.8}
 
 # -----------------------------------------------------------------------------

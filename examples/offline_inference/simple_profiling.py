@@ -57,14 +57,20 @@ def _parse_args() -> argparse.Namespace:
 
 
 def _build_prompts(num_requests: int, prefill_tokens: int, decode_tokens: int,
-                   seed: int):
+                   seed: int, tokenizer):
     cfg = RequestGeneratorConfig(
         num_requests=num_requests,
         length_config=FixedLengthConfig(prefill_tokens=prefill_tokens,
                                         decode_tokens=decode_tokens),
         seed=seed,
+        # IMPORTANT: Do not generate random token IDs with a hard-coded vocab.
+        # Token-ID mode defaults to a Llama-3 sized vocab (128256) and will
+        # produce out-of-vocabulary token IDs for models with smaller vocabs.
+        # Instead, generate text prompts and let vLLM tokenize with the
+        # model's real tokenizer to guarantee validity across models.
+        use_token_ids=False,
     )
-    generator = VLLMRequestGenerator(cfg)
+    generator = VLLMRequestGenerator(cfg, tokenizer=tokenizer)
     requests = generator.generate()
     return [req.prompt for req in requests]
 
@@ -88,17 +94,40 @@ def main():
         ignore_eos=True,
     )
 
-    warmup_prompts = _build_prompts(args.num_requests, args.prefill_tokens,
-                                    args.decode_tokens, args.seed + 1)
-    prompts = _build_prompts(args.num_requests, args.prefill_tokens,
-                             args.decode_tokens, args.seed)
+    # Explicitly increase max_model_len to accommodate prefill + decode.
+    # This script generates fixed-length prompts for profiling; if prefill
+    # consumes the original max_model_len, vLLM will fail during decode.
+    required_max_model_len = args.prefill_tokens + sampling_params.max_tokens
 
     llm = LLM(
         model=args.model,
         tensor_parallel_size=1,
         enforce_eager=True,
         gpu_memory_utilization=args.gpu_memory_utilization,
+        max_model_len=required_max_model_len,
     )
+
+    # Validate that the override took effect.
+    try:
+        max_model_len = llm.llm_engine.model_config.max_model_len  # type: ignore[attr-defined]
+    except AttributeError as e:
+        raise RuntimeError(
+            "Failed to read max_model_len from the vLLM engine. "
+            "Cannot validate the max_model_len override."
+        ) from e
+    if max_model_len < required_max_model_len:
+        raise RuntimeError(
+            "max_model_len override did not take effect. "
+            f"required_max_model_len={required_max_model_len}, "
+            f"engine_max_model_len={max_model_len}."
+        )
+
+    tokenizer = llm.get_tokenizer()
+    warmup_prompts = _build_prompts(args.num_requests, args.prefill_tokens,
+                                    args.decode_tokens, args.seed + 1,
+                                    tokenizer)
+    prompts = _build_prompts(args.num_requests, args.prefill_tokens,
+                             args.decode_tokens, args.seed, tokenizer)
 
     for _ in range(args.warmup_iters):
         llm.generate(warmup_prompts, sampling_params)

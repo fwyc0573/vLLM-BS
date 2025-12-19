@@ -35,6 +35,7 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
+from vllm.v1.utils import record_function_or_nullcontext
 from vllm.utils import (cdiv, direct_register_custom_op, has_deep_ep, has_pplx,
                         round_up)
 
@@ -1471,48 +1472,49 @@ class FusedMoE(CustomOp):
         """
         from vllm.model_executor.layers.fused_moe.fused_moe import fused_topk
 
-        # Check if we should use a routing simulation strategy
-        routing_strategy = envs.VLLM_MOE_ROUTING_SIMULATION_STRATEGY
-        if routing_strategy != "":
-            return RoutingSimulator.simulate_routing(
-                hidden_states=hidden_states,
-                router_logits=router_logits,
-                strategy_name=routing_strategy,
-                top_k=top_k,
-                indices_type=indices_type)
+        with record_function_or_nullcontext("moe_gating"):
+            # Check if we should use a routing simulation strategy
+            routing_strategy = envs.VLLM_MOE_ROUTING_SIMULATION_STRATEGY
+            if routing_strategy != "":
+                return RoutingSimulator.simulate_routing(
+                    hidden_states=hidden_states,
+                    router_logits=router_logits,
+                    strategy_name=routing_strategy,
+                    top_k=top_k,
+                    indices_type=indices_type)
 
-        # DeepSeekv2 uses grouped_top_k
-        if use_grouped_topk:
-            assert topk_group is not None
-            assert num_expert_group is not None
-            topk_weights, topk_ids = grouped_topk(
-                hidden_states=hidden_states,
-                gating_output=router_logits,
-                topk=top_k,
-                renormalize=renormalize,
-                num_expert_group=num_expert_group,
-                topk_group=topk_group,
-                scoring_func=scoring_func,
-                routed_scaling_factor=routed_scaling_factor,
-                e_score_correction_bias=e_score_correction_bias)
-            if indices_type is not None:
-                topk_ids = topk_ids.to(dtype=indices_type)
-        elif custom_routing_function is None:
-            topk_weights, topk_ids, token_expert_indices = fused_topk(
-                hidden_states=hidden_states,
-                gating_output=router_logits,
-                topk=top_k,
-                renormalize=renormalize,
-                indices_type=indices_type,
-            )
-        else:
-            topk_weights, topk_ids = custom_routing_function(
-                hidden_states=hidden_states,
-                gating_output=router_logits,
-                topk=top_k,
-                renormalize=renormalize)
-            if indices_type is not None:
-                topk_ids = topk_ids.to(dtype=indices_type)
+            # DeepSeekv2 uses grouped_top_k
+            if use_grouped_topk:
+                assert topk_group is not None
+                assert num_expert_group is not None
+                topk_weights, topk_ids = grouped_topk(
+                    hidden_states=hidden_states,
+                    gating_output=router_logits,
+                    topk=top_k,
+                    renormalize=renormalize,
+                    num_expert_group=num_expert_group,
+                    topk_group=topk_group,
+                    scoring_func=scoring_func,
+                    routed_scaling_factor=routed_scaling_factor,
+                    e_score_correction_bias=e_score_correction_bias)
+                if indices_type is not None:
+                    topk_ids = topk_ids.to(dtype=indices_type)
+            elif custom_routing_function is None:
+                topk_weights, topk_ids, token_expert_indices = fused_topk(
+                    hidden_states=hidden_states,
+                    gating_output=router_logits,
+                    topk=top_k,
+                    renormalize=renormalize,
+                    indices_type=indices_type,
+                )
+            else:
+                topk_weights, topk_ids = custom_routing_function(
+                    hidden_states=hidden_states,
+                    gating_output=router_logits,
+                    topk=top_k,
+                    renormalize=renormalize)
+                if indices_type is not None:
+                    topk_ids = topk_ids.to(dtype=indices_type)
 
         if enable_eplb:
             assert expert_load_view is not None
