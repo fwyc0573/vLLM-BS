@@ -97,12 +97,12 @@ def main():
     # Explicitly increase max_model_len to accommodate prefill + decode.
     # This script generates fixed-length prompts for profiling; if prefill
     # consumes the original max_model_len, vLLM will fail during decode.
-    required_max_model_len = args.prefill_tokens + sampling_params.max_tokens
+    required_max_model_len = args.prefill_tokens + sampling_params.max_tokens + 1024
 
     llm = LLM(
         model=args.model,
         tensor_parallel_size=1,
-        enforce_eager=True,
+        enforce_eager=False,
         gpu_memory_utilization=args.gpu_memory_utilization,
         max_model_len=required_max_model_len,
     )

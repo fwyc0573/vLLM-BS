@@ -1641,9 +1641,10 @@ def fused_experts_impl(
                 per_act_token_quant=per_channel_quant,
                 block_shape=block_shape)
 
-            sorted_token_ids, expert_ids, num_tokens_post_padded = (
-                moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
-                                     global_num_experts, expert_map))
+            with record_function_or_nullcontext("moe_shuffling"):
+                sorted_token_ids, expert_ids, num_tokens_post_padded = (
+                    moe_align_block_size(curr_topk_ids, config['BLOCK_SIZE_M'],
+                                         global_num_experts, expert_map))
 
             with record_function_or_nullcontext("moe_grouped_gemm"):
                 invoke_fused_moe_kernel(qcurr_hidden_states,
@@ -2000,9 +2001,10 @@ class TritonExperts(mk.FusedMoEPermuteExpertsUnpermute):
                                             (num_tokens, top_k_num, K))
 
         with record_function_or_nullcontext("moe_expert"):
-            sorted_token_ids, expert_ids, num_tokens_post_padded = (
-                moe_align_block_size(topk_ids, config['BLOCK_SIZE_M'],
-                                     global_num_experts, expert_map))
+            with record_function_or_nullcontext("moe_shuffling"):
+                sorted_token_ids, expert_ids, num_tokens_post_padded = (
+                    moe_align_block_size(topk_ids, config['BLOCK_SIZE_M'],
+                                         global_num_experts, expert_map))
 
             with record_function_or_nullcontext("moe_grouped_gemm"):
                 invoke_fused_moe_kernel(

@@ -5,7 +5,8 @@
 #   - Conda env: vllm-bs-0.10.2
 # tests/monolithic/offline_monolithic_profiling.sh --profile --model unsloth/Llama-3.2-1B-Instruct --gpu 7
 # tests/monolithic/offline_monolithic_profiling.sh --model unsloth/Llama-3.2-1B-Instruct --gpu 7
-# tests/monolithic/offline_monolithic_profiling.sh --profile --model microsoft/Phi-tiny-MoE-instruct --gpu 7
+# tests/monolithic/offline_monolithic_profiling.sh --profile --model microsoft/Phi-tiny-MoE-instruct --gpu 5
+# tests/monolithic/offline_monolithic_profiling.sh --model microsoft/Phi-tiny-MoE-instruct --gpu 5
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
@@ -24,12 +25,12 @@ export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 # 允许突破原来model的max_model_len
 
 GPU_ID=${GPU_ID:-1}
 NUM_REQUESTS=${NUM_REQUESTS:-1}
-PREFILL_TOKENS=${PREFILL_TOKENS:-4096}
-DECODE_TOKENS=${DECODE_TOKENS:-2}
+PREFILL_TOKENS=${PREFILL_TOKENS:-512}
+DECODE_TOKENS=${DECODE_TOKENS:-1024}
 SEED=${SEED:-42}
 WARMUP_ITERS=${WARMUP_ITERS:-3}
 ENABLE_PROFILE=${ENABLE_PROFILE:-0}
-PROFILE_MAX_DECODE_TOKENS=${PROFILE_MAX_DECODE_TOKENS:-256}
+PROFILE_MAX_DECODE_TOKENS=${PROFILE_MAX_DECODE_TOKENS:-2048}
 # microsoft/Phi-tiny-MoE-instruct
 # unsloth/Llama-3.2-1B-Instruct
 MODEL=${MODEL:-"microsoft/Phi-tiny-MoE-instruct"}
@@ -70,7 +71,7 @@ export VLLM_V1_ENABLE_PREFIX_CACHING=0
 if [[ $ENABLE_PROFILE -eq 1 ]]; then
     export VLLM_TORCH_PROFILER_DIR="$SCRIPT_DIR/profiles"
     export VLLM_TORCH_PROFILER_WITH_STACK=0
-    export VLLM_CUSTOM_SCOPES_FOR_PROFILING=1
+    export VLLM_CUSTOM_SCOPES_FOR_PROFILING=0
     # # ban torch.compile for profiling
     # export VLLM_TORCH_COMPILE_LEVEL=1
     mkdir -p "$VLLM_TORCH_PROFILER_DIR"
