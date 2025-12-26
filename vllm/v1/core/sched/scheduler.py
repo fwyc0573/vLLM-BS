@@ -37,6 +37,42 @@ from vllm.v1.structured_output import StructuredOutputManager
 
 logger = init_logger(__name__)
 
+# ============================================================================
+# Flow Validation Logger Setup
+# Enable via environment variable: VLLM_FLOW_VALIDATION=1
+# Log path via: VLLM_FLOW_LOG_PATH (defaults to stdout if not set)
+# ============================================================================
+import os as _flow_os
+import logging as _flow_logging
+
+_FLOW_VALIDATION_ENABLED = _flow_os.environ.get("VLLM_FLOW_VALIDATION", "0") == "1"
+_flow_logger: _flow_logging.Logger | None = None
+
+if _FLOW_VALIDATION_ENABLED:
+    _flow_logger = _flow_logging.getLogger("vllm.flow_validation")
+    _flow_logger.setLevel(_flow_logging.INFO)
+    _flow_logger.propagate = False  # Prevent duplicate logs
+
+    # Create handler based on log path
+    _flow_log_path = _flow_os.environ.get("VLLM_FLOW_LOG_PATH", "")
+    if _flow_log_path:
+        _flow_handler = _flow_logging.FileHandler(_flow_log_path)
+    else:
+        _flow_handler = _flow_logging.StreamHandler()
+
+    _flow_handler.setFormatter(
+        _flow_logging.Formatter("%(message)s")  # Plain format for easy parsing
+    )
+    _flow_logger.addHandler(_flow_handler)
+    logger.info("Flow validation logging ENABLED. Log path: %s",
+                _flow_log_path if _flow_log_path else "stdout")
+
+
+def _log_flow(message: str) -> None:
+    """Log a flow validation message if enabled."""
+    if _flow_logger is not None:
+        _flow_logger.info(message)
+
 
 class Scheduler(SchedulerInterface):
 
@@ -203,6 +239,35 @@ class Scheduler(SchedulerInterface):
         # For logging.
         scheduled_timestamp = time.monotonic()
 
+        # Flow validation: log iteration start with initial state
+        _available_blocks = self.kv_cache_manager.block_pool.get_num_free_blocks()
+        _log_flow(
+            f"[ITERATION_START] token_budget={token_budget}, "
+            f"running_count={len(self.running)}, "
+            f"waiting_count={len(self.waiting)}, "
+            f"available_blocks={_available_blocks}, "
+            f"max_running_reqs={self.max_num_running_reqs}"
+        )
+
+        # Flow validation: log memory state
+        _total_blocks = self.kv_cache_manager.block_pool.num_gpu_blocks
+        _allocated_blocks = _total_blocks - _available_blocks
+        _usage_ratio = _allocated_blocks / _total_blocks if _total_blocks > 0 else 0.0
+        _watermark = getattr(self, 'watermark_blocks', 0)
+        _log_flow(
+            f"[MEMORY_STATE] total_blocks={_total_blocks}, "
+            f"allocated_blocks={_allocated_blocks}, "
+            f"free_blocks={_available_blocks}, "
+            f"usage_ratio={_usage_ratio:.4f}, "
+            f"watermark_blocks={_watermark}"
+        )
+
+        # Flow validation: log Phase 1 start
+        _log_flow(
+            f"[PHASE1_START] running_count={len(self.running)}, "
+            f"token_budget={token_budget}"
+        )
+
         # First, schedule the RUNNING requests.
         req_index = 0
         while req_index < len(self.running) and token_budget > 0:
@@ -256,17 +321,57 @@ class Scheduler(SchedulerInterface):
                     num_lookahead_tokens=self.num_lookahead_tokens)
                 if new_blocks is None:
                     # The request cannot be scheduled.
+                    # Flow validation: log memory pressure
+                    _current_free = self.kv_cache_manager.block_pool.get_num_free_blocks()
+                    _log_flow(
+                        f"[MEMORY_PRESSURE] trigger=allocation_failed, "
+                        f"requesting_req={request.request_id}, "
+                        f"requested_tokens={num_new_tokens}, "
+                        f"available_blocks={_current_free}, "
+                        f"running_queue_size={len(self.running)}"
+                    )
+
                     # Preempt the lowest-priority request.
                     if self.policy == SchedulingPolicy.PRIORITY:
                         preempted_req = max(
                             self.running,
                             key=lambda r: (r.priority, r.arrival_time),
                         )
+                        # Capture state before modification
+                        _victim_computed = preempted_req.num_computed_tokens
+                        _victim_blocks = self._get_block_count(preempted_req.request_id)
+                        _victim_position = self.running.index(preempted_req)
+
+                        # Flow validation: log victim selection
+                        _log_flow(
+                            f"[VICTIM_SELECTION] policy=PRIORITY, "
+                            f"victim={preempted_req.request_id}, "
+                            f"priority={preempted_req.priority}, "
+                            f"arrival_time={preempted_req.arrival_time}, "
+                            f"reason=highest_priority_value_earliest_arrival"
+                        )
+
                         self.running.remove(preempted_req)
                         if preempted_req in scheduled_running_reqs:
                             scheduled_running_reqs.remove(preempted_req)
                     else:
-                        preempted_req = self.running.pop()
+                        preempted_req = self.running[-1]  # FCFS: tail of queue
+                        # Capture state before modification
+                        _victim_computed = preempted_req.num_computed_tokens
+                        _victim_blocks = self._get_block_count(preempted_req.request_id)
+                        _victim_position = len(self.running) - 1
+
+                        # Flow validation: log victim selection
+                        _log_flow(
+                            f"[VICTIM_SELECTION] policy=FCFS, "
+                            f"victim={preempted_req.request_id}, "
+                            f"position=tail, "
+                            f"reason=last_in_running_queue"
+                        )
+
+                        self.running.pop()
+
+                    _running_before = len(self.running) + 1  # +1 because already removed
 
                     self.kv_cache_manager.free(preempted_req)
                     self.encoder_cache_manager.free(preempted_req)
@@ -275,6 +380,24 @@ class Scheduler(SchedulerInterface):
                     if self.log_stats:
                         preempted_req.record_event(
                             EngineCoreEventType.PREEMPTED, scheduled_timestamp)
+
+                    # Flow validation: log preemption event
+                    _log_flow(
+                        f"[PREEMPTION] req={preempted_req.request_id}, "
+                        f"policy={self.policy.name}"
+                    )
+
+                    # Flow validation: log detailed preemption info
+                    _log_flow(
+                        f"[PREEMPTION_DETAIL] req={preempted_req.request_id}, "
+                        f"num_computed_tokens_before={_victim_computed}, "
+                        f"freed_blocks={_victim_blocks}, "
+                        f"policy={self.policy.name}, "
+                        f"victim_selection_reason={'lowest_priority' if self.policy == SchedulingPolicy.PRIORITY else 'tail_of_running_queue'}, "
+                        f"queue_position_before={_victim_position}, "
+                        f"running_count_before={_running_before}, "
+                        f"running_count_after={len(self.running)}"
+                    )
 
                     self.waiting.prepend_request(preempted_req)
                     preempted_reqs.append(preempted_req)
@@ -297,6 +420,14 @@ class Scheduler(SchedulerInterface):
             token_budget -= num_new_tokens
             req_index += 1
 
+            # Flow validation: log RUNNING request scheduled
+            _num_new_blocks = sum(len(group) for group in new_blocks.blocks) if new_blocks else 0
+            _log_flow(
+                f"[RUNNING_SCHEDULED] req={request.request_id}, "
+                f"num_new_tokens={num_new_tokens}, "
+                f"blocks_allocated={_num_new_blocks}"
+            )
+
             # Speculative decode related.
             if request.spec_token_ids:
                 num_scheduled_spec_tokens = (num_new_tokens +
@@ -317,6 +448,15 @@ class Scheduler(SchedulerInterface):
                     self.encoder_cache_manager.allocate(request, i)
                 encoder_compute_budget = new_encoder_compute_budget
 
+        # Flow validation: log Phase 1 end
+        _available_blocks_p1 = self.kv_cache_manager.block_pool.get_num_free_blocks()
+        _log_flow(
+            f"[PHASE1_END] scheduled_count={len(scheduled_running_reqs)}, "
+            f"preempted_count={len(preempted_reqs)}, "
+            f"token_budget_remaining={token_budget}, "
+            f"available_blocks={_available_blocks_p1}"
+        )
+
         # Record the LoRAs in scheduled_running_reqs
         scheduled_loras: set[int] = set()
         if self.lora_config:
@@ -331,6 +471,12 @@ class Scheduler(SchedulerInterface):
 
         # Next, schedule the WAITING requests.
         if not preempted_reqs:
+            # Flow validation: log Phase 2 start
+            _log_flow(
+                f"[PHASE2_START] waiting_count={len(self.waiting)}, "
+                f"token_budget={token_budget}, "
+                f"running_count={len(self.running)}"
+            )
             while self.waiting and token_budget > 0:
                 if len(self.running) == self.max_num_running_reqs:
                     break
@@ -504,6 +650,14 @@ class Scheduler(SchedulerInterface):
                     # into the WAITING_FOR_REMOTE_KV state.
                     skipped_waiting_requests.prepend_request(request)
                     request.status = RequestStatus.WAITING_FOR_REMOTE_KVS
+
+                    # Flow validation: log KV transfer initiation
+                    _log_flow(
+                        f"[KV_TRANSFER_STATE] req={request.request_id}, "
+                        f"status=WAITING_FOR_REMOTE_KVS, "
+                        f"num_blocks_received=0, "
+                        f"num_computed_tokens=0"
+                    )
                     continue
 
                 req_index += 1
@@ -515,6 +669,13 @@ class Scheduler(SchedulerInterface):
                     scheduled_new_reqs.append(request)
                 elif request.status == RequestStatus.PREEMPTED:
                     scheduled_resumed_reqs.append(request)
+
+                    # Flow validation: log preemption recovery
+                    _log_flow(
+                        f"[PREEMPTION_RECOVERY] req={request.request_id}, "
+                        f"was_preempted=True, "
+                        f"recompute_tokens={num_new_tokens}"
+                    )
                 else:
                     raise RuntimeError(
                         f"Invalid request status: {request.status}")
@@ -527,6 +688,19 @@ class Scheduler(SchedulerInterface):
                 token_budget -= num_new_tokens
                 request.status = RequestStatus.RUNNING
                 request.num_computed_tokens = num_computed_tokens
+
+                # Flow validation: log WAITING request admission
+                _allocated_blocks = self.kv_cache_manager.get_blocks(
+                    request.request_id)
+                _num_blocks = sum(len(group) for group in _allocated_blocks.blocks) if _allocated_blocks else 0
+                _log_flow(
+                    f"[ADMISSION] req={request.request_id}, "
+                    f"num_tokens={num_new_tokens}, "
+                    f"running_count={len(self.running)}, "
+                    f"token_budget_remaining={token_budget}, "
+                    f"blocks_allocated={_num_blocks}"
+                )
+
                 # Count the number of prefix cached tokens.
                 if request.num_cached_tokens < 0:
                     request.num_cached_tokens = num_computed_tokens
@@ -538,6 +712,15 @@ class Scheduler(SchedulerInterface):
                     for i in encoder_inputs_to_schedule:
                         self.encoder_cache_manager.allocate(request, i)
                     encoder_compute_budget = new_encoder_compute_budget
+
+            # Flow validation: log Phase 2 end
+            _available_blocks_p2 = self.kv_cache_manager.block_pool.get_num_free_blocks()
+            _log_flow(
+                f"[PHASE2_END] admitted_count={len(scheduled_new_reqs) + len(scheduled_resumed_reqs)}, "
+                f"token_budget_remaining={token_budget}, "
+                f"available_blocks={_available_blocks_p2}, "
+                f"running_count={len(self.running)}"
+            )
 
         # Put back any skipped requests at the head of the waiting queue
         if skipped_waiting_requests:
@@ -553,6 +736,28 @@ class Scheduler(SchedulerInterface):
         # len(self.running).
         assert (len(scheduled_new_reqs) + len(scheduled_resumed_reqs) +
                 len(scheduled_running_reqs) <= len(self.running))
+
+        # Flow validation: log batch formation
+        _batch_size = len(scheduled_new_reqs) + len(scheduled_resumed_reqs) + len(scheduled_running_reqs)
+        _log_flow(
+            f"[BATCH_FORMATION] total_tokens={total_num_scheduled_tokens}, "
+            f"new_admitted={len(scheduled_new_reqs)}, "
+            f"resumed={len(scheduled_resumed_reqs)}, "
+            f"running_continued={len(scheduled_running_reqs)}, "
+            f"batch_size={_batch_size}"
+        )
+
+        # Flow validation: log iteration summary
+        _log_flow(
+            f"[ITERATION_SUMMARY] "
+            f"running_scheduled={len(scheduled_running_reqs)}, "
+            f"new_admitted={len(scheduled_new_reqs)}, "
+            f"resumed={len(scheduled_resumed_reqs)}, "
+            f"preempted={len(preempted_reqs)}, "
+            f"total_tokens={total_num_scheduled_tokens}, "
+            f"running_queue_size={len(self.running)}, "
+            f"waiting_queue_size={len(self.waiting)}"
+        )
 
         # Get the longest common prefix among all requests in the running queue.
         # This can be potentially used for cascade attention.
@@ -1259,6 +1464,15 @@ class Scheduler(SchedulerInterface):
         # Update the request state for scheduling.
         request.num_computed_tokens = num_computed_tokens
 
+        # Flow validation: log KV transfer completion
+        _num_blocks = len(block_ids)
+        _log_flow(
+            f"[KV_TRANSFER_STATE] req={request.request_id}, "
+            f"status=TRANSFER_COMPLETE, "
+            f"num_blocks_received={_num_blocks}, "
+            f"num_computed_tokens={num_computed_tokens}"
+        )
+
         # Return that we are ready.
         self.finished_recving_kv_req_ids.remove(request.request_id)
         return True
@@ -1285,3 +1499,25 @@ class Scheduler(SchedulerInterface):
         for req_id in (kv_connector_output.finished_sending or ()):
             logger.debug("Finished sending KV transfer for request %s", req_id)
             self._free_blocks(self.requests[req_id])
+
+    # ========================================================================
+    # Helper methods for flow validation logging
+    # ========================================================================
+
+    def _get_block_count(self, request_id: str) -> int:
+        """
+        Get the number of KV cache blocks allocated for a request.
+
+        Args:
+            request_id: The request ID to query.
+
+        Returns:
+            Number of allocated blocks, or 0 if request not found.
+        """
+        try:
+            block_ids_tuple = self.kv_cache_manager.get_block_ids(request_id)
+            if block_ids_tuple and len(block_ids_tuple) > 0:
+                return len(block_ids_tuple[0])
+            return 0
+        except (KeyError, AttributeError):
+            return 0
