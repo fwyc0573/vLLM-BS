@@ -6,7 +6,7 @@
 # tests/monolithic/offline_monolithic_profiling.sh --profile --model unsloth/Llama-3.2-1B-Instruct --gpu 7
 # tests/monolithic/offline_monolithic_profiling.sh --model unsloth/Llama-3.2-1B-Instruct --gpu 7
 # tests/monolithic/offline_monolithic_profiling.sh --profile --model microsoft/Phi-tiny-MoE-instruct --gpu 5
-# tests/monolithic/offline_monolithic_profiling.sh  --gpu 5
+# tests/monolithic/offline_monolithic_profiling.sh  --gpu 6
 set -euo pipefail
 
 # -----------------------------------------------------------------------------
@@ -24,7 +24,7 @@ export VLLM_ALLOW_LONG_MAX_MODEL_LEN=1 # 允许突破原来model的max_model_len
 
 
 GPU_ID=${GPU_ID:-1}
-NUM_REQUESTS=${NUM_REQUESTS:-1}
+NUM_REQUESTS=${NUM_REQUESTS:-32}
 PREFILL_TOKENS=${PREFILL_TOKENS:-512}
 DECODE_TOKENS=${DECODE_TOKENS:-32}
 SEED=${SEED:-42}
@@ -34,7 +34,7 @@ PROFILE_MAX_DECODE_TOKENS=${PROFILE_MAX_DECODE_TOKENS:-2048}
 # microsoft/Phi-tiny-MoE-instruct
 # unsloth/Llama-3.2-1B-Instruct
 MODEL=${MODEL:-"mmnga/Mixtral-Fusion-4x7B-Instruct-v0.1"}
-GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.95}
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.9}
 LOAD_FORMAT=${LOAD_FORMAT:-"auto"}  # 添加 load_format 支持
 
 # -----------------------------------------------------------------------------

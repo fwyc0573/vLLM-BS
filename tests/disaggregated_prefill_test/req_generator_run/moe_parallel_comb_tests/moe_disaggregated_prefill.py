@@ -1,9 +1,10 @@
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """
-This file demonstrates the example usage of disaggregated prefilling
-We will launch 2 vllm instances (GPU 0 for prefill and GPU 1 for decode),
-and then transfer the KV cache between them.
+Custom disaggregated prefill script for MoE parallel combination tests.
+This script extends the original disaggregated_prefill.py to support
+tensor parallel, pipeline parallel, and expert parallel configurations.
 """
 
 import argparse
@@ -13,7 +14,7 @@ import time
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Disaggregated prefill/decode with KV transfer.")
+        description="MoE Disaggregated prefill/decode with parallel configurations.")
 
     parser.add_argument("--role",
                         type=str,
@@ -43,7 +44,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default="unsloth/Llama-3.2-1B-Instruct",
+        default="mmnga/Mixtral-Fusion-4x7B-Instruct-v0.1",
         help="Model name or path.")
     parser.add_argument("--gpu-memory-utilization",
                         type=float,
@@ -63,6 +64,23 @@ def _parse_args() -> argparse.Namespace:
                         type=float,
                         default=1500.0,
                         help="Timeout waiting for prefill completion (seconds).")
+
+    # Parallel configuration arguments
+    parser.add_argument("--tensor-parallel-size",
+                        type=int,
+                        default=1,
+                        help="Tensor parallel size.")
+    parser.add_argument("--pipeline-parallel-size",
+                        type=int,
+                        default=1,
+                        help="Pipeline parallel size.")
+    parser.add_argument("--data-parallel-size",
+                        type=int,
+                        default=1,
+                        help="Data parallel size.")
+    parser.add_argument("--enable-expert-parallel",
+                        action="store_true",
+                        help="Enable expert parallel for MoE models.")
 
     # Profiling (aligned with tests/disaggregated_prefill_test patterns).
     parser.add_argument("--profile",
@@ -102,61 +120,46 @@ def _generate_workload_prompts(args: argparse.Namespace,
     # at both ends of the vocabulary
     safe_max_token_id = max(vocab_size - 1000, 2000)  # Ensure at least some range
     
-    config = RequestGeneratorConfig(
+    # Create request generator config with model-specific vocabulary size
+    request_generator_config = RequestGeneratorConfig(
         num_requests=args.num_requests,
-        length_config=FixedLengthConfig(prefill_tokens=args.prefill_tokens,
-                                        decode_tokens=args.decode_tokens),
-        seed=int(args.seed) + int(seed_offset),
+        length_config=FixedLengthConfig(
+            prefill_tokens=args.prefill_tokens,
+            decode_tokens=args.decode_tokens,
+        ),
+        seed=args.seed + seed_offset,
         vocab_size=vocab_size,
         min_token_id=1000,
         max_token_id=safe_max_token_id,
     )
-    generator = VLLMRequestGenerator(config)
-    requests = generator.generate()
-    prompts = [r.prompt for r in requests]
+    
+    # Generate requests
+    request_generator = VLLMRequestGenerator(request_generator_config)
+    requests = request_generator.generate()
+    
+    # Extract prompts from requests
+    prompts = [request.prompt for request in requests]
     return prompts
 
 
-def _validate_runtime_env(args: argparse.Namespace) -> None:
-    # Prefer controlling environment variables in shell scripts. Fail fast.
-    if os.environ.get("VLLM_USE_V1") != "1":
-        raise RuntimeError(
-            "VLLM_USE_V1 must be set to 1. Please export VLLM_USE_V1=1 "
-            "before running this example.")
-    if args.profile and not os.environ.get("VLLM_TORCH_PROFILER_DIR"):
-        raise RuntimeError(
-            "Profiling is enabled but VLLM_TORCH_PROFILER_DIR is not set. "
-            "Please export VLLM_TORCH_PROFILER_DIR before running.")
-
-
-def _wait_for_file(path: str, timeout_s: float) -> None:
-    deadline = time.monotonic() + float(timeout_s)
-    while time.monotonic() < deadline:
-        if os.path.exists(path):
-            return
-        time.sleep(0.1)
-    raise TimeoutError(f"Timeout waiting for sync file: {path}")
-
-
 def run_prefill(args: argparse.Namespace):
-    _validate_runtime_env(args)
+    """Run prefill (producer) role."""
     import torch
     from vllm import LLM, SamplingParams
     from vllm.config import KVTransferConfig
     from vllm.v1.utils import record_function_or_nullcontext
 
-    # The prefill node receives two requests, while the decode node receives
-    # three requests. So the decode node will only receive the KV Cache for
-    # requests 1 and 3. The decode node will use the KV Cache of requests 1
-    # and 3 and do prefilling on request 2.
+    print(f"[PREFILL] Starting prefill with TP={args.tensor_parallel_size}, "
+          f"PP={args.pipeline_parallel_size}, DP={args.data_parallel_size}, "
+          f"EP={args.enable_expert_parallel}")
+
+    # Generate workload prompts
     warmup_prompts = _generate_workload_prompts(args, seed_offset=1)
     prompts = _generate_workload_prompts(args, seed_offset=0)
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=1)
 
     # Using P2pNcclConnector to transmit KV caches between vLLM instances.
     # This instance is the prefill node (kv_producer, rank 0).
-    # The number of parallel instances for KV cache transfer is set to 2,
-    # as required for P2pNcclConnector.
     ktc = KVTransferConfig(
         kv_connector="P2pNcclConnector",
         kv_role="kv_producer",
@@ -165,14 +168,28 @@ def run_prefill(args: argparse.Namespace):
         kv_port=args.kv_port,
     )
 
-    # Set GPU memory utilization to 0.8 for an A6000 GPU with 40GB
-    # memory. You may need to adjust the value to fit your GPU.
+    # Create LLM with parallel configuration
     llm = LLM(
         model=args.model,
         kv_transfer_config=ktc,
         gpu_memory_utilization=args.gpu_memory_utilization,
+        tensor_parallel_size=args.tensor_parallel_size,
+        pipeline_parallel_size=args.pipeline_parallel_size,
+        data_parallel_size=args.data_parallel_size,
+        enable_expert_parallel=args.enable_expert_parallel,
         enforce_eager=False,
     )
+
+    # Wait for decode to be ready before warmup (to avoid NCCL hang)
+    # The decode process creates a "decode_ready" file after LLM initialization
+    decode_ready_file = args.sync_file.replace("prefill_done", "decode_ready")
+    print(f"[PREFILL] Waiting for decode to be ready (sync file: {decode_ready_file})")
+    start_time = time.time()
+    while not os.path.exists(decode_ready_file):
+        if time.time() - start_time > args.prefill_timeout:
+            raise TimeoutError(f"Decode did not become ready within {args.prefill_timeout} seconds")
+        time.sleep(0.1)
+    print("[PREFILL] Decode is ready, starting warmup...")
 
     for _ in range(args.warmup_iters):
         llm.generate(warmup_prompts, sampling_params)
@@ -196,49 +213,36 @@ def run_prefill(args: argparse.Namespace):
     with open(args.sync_file, "w") as f:
         f.write("prefill_done\n")
 
-    # To keep the prefill node running in case the decode node is not done;
-    # otherwise, the script might exit prematurely, causing incomplete decoding.
+    # Keep the prefill node running to maintain KV cache connection
+    print("[PREFILL] Keeping prefill node alive for KV cache transfer...")
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("Script stopped by user.")
+        print("[PREFILL] Prefill node shutting down.")
 
 
 def run_decode(args: argparse.Namespace):
-    _validate_runtime_env(args)
+    """Run decode (consumer) role."""
     import torch
     from vllm import LLM, SamplingParams
     from vllm.config import KVTransferConfig
     from vllm.v1.utils import record_function_or_nullcontext
 
+    print(f"[DECODE] Starting decode with TP={args.tensor_parallel_size}, "
+          f"PP={args.pipeline_parallel_size}, DP={args.data_parallel_size}, "
+          f"EP={args.enable_expert_parallel}")
+
+    # Generate workload prompts (same as prefill)
     warmup_prompts = _generate_workload_prompts(args, seed_offset=1)
     prompts = _generate_workload_prompts(args, seed_offset=0)
-    max_decode_tokens = int(args.decode_tokens)
-    if args.profile:
-        cap = int(args.profile_max_decode_tokens)
-        if cap <= 0:
-            raise ValueError("--profile-max-decode-tokens must be > 0")
-        if cap < max_decode_tokens:
-            print(
-                "NOTE: --profile is enabled; capping decode max_tokens from "
-                f"{max_decode_tokens} to {cap} to keep profiler traces "
-                "manageable. Override with --profile-max-decode-tokens.")
-        max_decode_tokens = min(max_decode_tokens, cap)
+    
+    # For decode, we use max_tokens from profile_max_decode_tokens if profiling
+    max_tokens = args.profile_max_decode_tokens if args.profile else args.decode_tokens
+    sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=max_tokens)
 
-    sampling_params = SamplingParams(
-        temperature=0,
-        top_p=0.95,
-        max_tokens=max_decode_tokens,
-        ignore_eos=True,
-        stop=None,
-        stop_token_ids=None,
-    )
-
-    # Using P2pNcclConnector to transmit KV caches between vLLM instances.
+    # Using P2pNcclConnector to receive KV caches from prefill instance.
     # This instance is the decode node (kv_consumer, rank 1).
-    # The number of parallel instances for KV cache transfer is set to 2,
-    # as required for P2pNcclConnector.
     ktc = KVTransferConfig(
         kv_connector="P2pNcclConnector",
         kv_role="kv_consumer",
@@ -247,24 +251,36 @@ def run_decode(args: argparse.Namespace):
         kv_port=args.kv_port,
     )
 
-    # Set GPU memory utilization to 0.8 for an A6000 GPU with 40GB
-    # memory. You may need to adjust the value to fit your GPU.
+    # Create LLM with parallel configuration
     llm = LLM(
         model=args.model,
         kv_transfer_config=ktc,
         gpu_memory_utilization=args.gpu_memory_utilization,
+        tensor_parallel_size=args.tensor_parallel_size,
+        pipeline_parallel_size=args.pipeline_parallel_size,
+        data_parallel_size=args.data_parallel_size,
+        enable_expert_parallel=args.enable_expert_parallel,
         enforce_eager=False,
-        max_num_seqs=64,
     )
 
-    print("Waiting for prefill node to finish...")
-    _wait_for_file(args.sync_file, timeout_s=args.prefill_timeout)
+    # Signal that decode is ready (LLM and P2pNcclEngine initialized)
+    # This allows prefill to start warmup without NCCL hang
+    decode_ready_file = args.sync_file.replace("prefill_done", "decode_ready")
+    print(f"[DECODE] LLM initialized, signaling ready (sync file: {decode_ready_file})")
+    with open(decode_ready_file, "w") as f:
+        f.write("decode_ready\n")
+
+    # Wait for prefill to complete
+    print(f"[DECODE] Waiting for prefill completion (sync file: {args.sync_file})")
+    start_time = time.time()
+    while not os.path.exists(args.sync_file):
+        if time.time() - start_time > args.prefill_timeout:
+            raise TimeoutError(f"Prefill did not complete within {args.prefill_timeout} seconds")
+        time.sleep(0.1)
+    print("[DECODE] Prefill completed, starting decode...")
 
     for _ in range(args.warmup_iters):
         llm.generate(warmup_prompts, sampling_params)
-
-    # At this point when the prefill_done is set, the kv-cache should have been
-    # transferred to this decode node, so we can start decoding.
     if args.profile:
         llm.start_profile()
     with record_function_or_nullcontext("e2e_llm_generate_decode"):
@@ -277,14 +293,31 @@ def run_decode(args: argparse.Namespace):
     decode_wall_time = wall_end - wall_start
     print(f"[DECODE] Total generation wall-clock time: {decode_wall_time:.6f} seconds",
           flush=True)
-    for output in outputs:
-        prompt = output.prompt
-        generated_text = output.outputs[0].text
-        print(f"Prompt: {prompt!r}, Generated text: {generated_text!r}")
+    
+    # Print some sample outputs
+    print("[DECODE] Sample outputs:")
+    for i, output in enumerate(outputs[:2]):  # Show first 2 outputs
+        print(f"  Request {i}: {output.outputs[0].text[:100]}...")
+    
+    print("Decode node is finished.", flush=True)
 
 
 def main():
     args = _parse_args()
+    
+    print(f"Starting MoE disaggregated prefill test:")
+    print(f"  Role: {args.role}")
+    print(f"  Model: {args.model}")
+    print(f"  Tensor Parallel Size: {args.tensor_parallel_size}")
+    print(f"  Pipeline Parallel Size: {args.pipeline_parallel_size}")
+    print(f"  Data Parallel Size: {args.data_parallel_size}")
+    print(f"  Expert Parallel: {args.enable_expert_parallel}")
+    print(f"  Requests: {args.num_requests}")
+    print(f"  Prefill tokens: {args.prefill_tokens}")
+    print(f"  Decode tokens: {args.decode_tokens}")
+    print(f"  KV Port: {args.kv_port}")
+    print(f"  Sync file: {args.sync_file}")
+    
     if args.role == "prefill":
         run_prefill(args)
     elif args.role == "decode":

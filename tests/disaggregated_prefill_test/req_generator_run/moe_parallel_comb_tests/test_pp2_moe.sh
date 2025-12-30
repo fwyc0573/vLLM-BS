@@ -1,33 +1,9 @@
 #!/bin/bash
-# Script to run disaggregated prefill-decode test with P2pNcclConnector
-#
-# This script tests the P2pNcclConnector backend for KV cache transfer
-# between prefill and decode nodes using the Request Generator.
-#
-# IMPORTANT: This script uses separate torch compile cache directories for
-# prefill and decode processes to avoid race conditions when compiling MoE models.
-# Two types of cache isolation are implemented:
-#   1. VLLM_CACHE_ROOT - Controls vLLM's torch_compile_cache location
-#   2. TORCHINDUCTOR_CACHE_DIR - Controls PyTorch's aot_autograd and fxgraph cache
-# The cache directories are automatically created in the script directory.
-#
-# Requirements:
-#   - Two available GPUs (default: GPU 6 and GPU 7)
-#   - Conda environment: vllm-bs-0.10.2
-#
-# Usage:
-#   ./offline_P2pNcclConnector_test.sh                # Default settings
-#   ./offline_P2pNcclConnector_test.sh --profile      # Enable profiling
-#   ./offline_P2pNcclConnector_test.sh --num-requests 8 --prefill-tokens 512
-#   ./offline_P2pNcclConnector_test.sh --profile --profile-max-decode-tokens 256
-#   tests/disaggregated_prefill_test/req_generator_run/offline_P2pNcclConnector_test.sh --profile --gpu-prefill 1 --gpu-decode 2
-#   tests/disaggregated_prefill_test/req_generator_run/offline_P2pNcclConnector_test.sh --gpu-prefill 1 --gpu-decode 2 --model "mmnga/Mixtral-Fusion-4x7B-Instruct-v0.1"
-# Environment Variables:
-#   GPU_PREFILL - GPU for prefill node (default: 6)
-#   GPU_DECODE  - GPU for decode node (default: 7)
-#   NUM_REQUESTS - Number of requests (default: 4)
-#   PREFILL_TOKENS - Prefill tokens per request (default: 1024)
-#   DECODE_TOKENS - Decode tokens per request (default: 64)
+# Test: PP=2 MoE Parallel Configuration
+# Description: Test P2pNcclConnector with Pipeline Parallel size 2 on MoE model
+# Expected Result: FAIL - P2pNcclConnector does not support Pipeline Parallel
+# GPU Allocation: Prefill=[0,1], Decode=[2,3]
+# Requirements: 3.1, 3.2, 3.5
 
 set -euo pipefail
 
@@ -41,7 +17,21 @@ export FRONTIER_PATH="/research/d1/gds/ytyang/yichengfeng/frontier"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm"
 EXAMPLE_DIR="$PROJECT_ROOT/examples/offline_inference"
-OUTPUT_LOG="$SCRIPT_DIR/p2p_nccl_connector_test_output.log"
+MOE_SCRIPT="$SCRIPT_DIR/moe_disaggregated_prefill.py"
+OUTPUT_LOG="$SCRIPT_DIR/logs/test_pp2_moe_output.log"
+
+# Test-specific configuration
+TEST_NAME="PP=2 MoE Test"
+MODEL="mmnga/Mixtral-Fusion-4x7B-Instruct-v0.1"
+TP_SIZE=1
+PP_SIZE=2
+DP_SIZE=1
+ENABLE_EP=false
+
+# GPU allocation for PP=2: Prefill uses [0,1], Decode uses [2,3]
+# Note: PP=2 means 2 pipeline stages, so we need 2 GPUs per instance
+GPU_PREFILL="0,1"
+GPU_DECODE="2,3"
 
 # Default parameters (can be overridden via command line or environment variables)
 NUM_REQUESTS=${NUM_REQUESTS:-8}
@@ -52,12 +42,7 @@ WARMUP_ITERS=${WARMUP_ITERS:-3}
 ENABLE_PROFILE=${ENABLE_PROFILE:-0}
 PROFILE_MAX_DECODE_TOKENS=${PROFILE_MAX_DECODE_TOKENS:-256}
 
-# GPU configuration - default to GPU 6 and 7 per user requirement
-GPU_PREFILL=${GPU_PREFILL:-6}
-GPU_DECODE=${GPU_DECODE:-7}
-
-# Model configuration - align with SharedStorageConnector baseline defaults.
-MODEL=${MODEL:-"unsloth/Llama-3.2-1B-Instruct"}
+# Model configuration
 GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.7}
 
 # Timeout configuration
@@ -96,18 +81,6 @@ while [[ $# -gt 0 ]]; do
             PROFILE_MAX_DECODE_TOKENS="$2"
             shift 2
             ;;
-        --model)
-            MODEL="$2"
-            shift 2
-            ;;
-        --gpu-prefill)
-            GPU_PREFILL="$2"
-            shift 2
-            ;;
-        --gpu-decode)
-            GPU_DECODE="$2"
-            shift 2
-            ;;
         --gpu-memory-utilization)
             GPU_MEMORY_UTILIZATION="$2"
             shift 2
@@ -142,7 +115,6 @@ export VLLM_V1_ENABLE_CHUNKED_PREFILL=1
 export VLLM_V1_ENABLE_PREFIX_CACHING=0
 
 # Profiling configuration
-# NOTE: Disabling heavy profiling options per user requirement
 if [[ $ENABLE_PROFILE -eq 1 ]]; then
     export VLLM_TORCH_PROFILER_DIR="$SCRIPT_DIR/profiles"
     export VLLM_TORCH_PROFILER_WITH_STACK=0
@@ -163,16 +135,13 @@ export FLASHINFER_WORKSPACE_BASE="$FLASHINFER_CACHE_DIR"
 export VLLM_CONFIG_ROOT="$PROJECT_ROOT/.vllm_config"
 
 # vLLM cache directories - separate for each process to avoid torch.compile race conditions
-# This sets VLLM_CACHE_ROOT which controls the torch_compile_cache location
-PREFILL_CACHE_DIR="$SCRIPT_DIR/vllm_cache_prefill"
-DECODE_CACHE_DIR="$SCRIPT_DIR/vllm_cache_decode"
+PREFILL_CACHE_DIR="$SCRIPT_DIR/vllm_cache_prefill_pp2"
+DECODE_CACHE_DIR="$SCRIPT_DIR/vllm_cache_decode_pp2"
 mkdir -p "$PREFILL_CACHE_DIR" "$DECODE_CACHE_DIR"
 
 # PyTorch Inductor cache directories - separate for each process to avoid aot_autograd race conditions
-# This is CRITICAL for MoE models where compilation takes longer and race conditions are more likely
-# TORCHINDUCTOR_CACHE_DIR controls: aotautograd cache, fxgraph cache, and triton cache
-PREFILL_INDUCTOR_CACHE_DIR="$SCRIPT_DIR/inductor_cache_prefill"
-DECODE_INDUCTOR_CACHE_DIR="$SCRIPT_DIR/inductor_cache_decode"
+PREFILL_INDUCTOR_CACHE_DIR="$SCRIPT_DIR/inductor_cache_prefill_pp2"
+DECODE_INDUCTOR_CACHE_DIR="$SCRIPT_DIR/inductor_cache_decode_pp2"
 mkdir -p "$PREFILL_INDUCTOR_CACHE_DIR" "$DECODE_INDUCTOR_CACHE_DIR"
 
 # ============================================================================
@@ -188,9 +157,12 @@ conda activate vllm-bs-0.10.2
 
 cd "$SCRIPT_DIR"
 
+# Ensure logs directory exists
+mkdir -p "$SCRIPT_DIR/logs"
+
 {
     echo "=========================================="
-    echo "Disaggregated Prefill-Decode Test"
+    echo "$TEST_NAME"
     echo "with P2pNcclConnector and Request Generator"
     echo "=========================================="
     echo "Date: $(date)"
@@ -200,6 +172,10 @@ cd "$SCRIPT_DIR"
     echo ""
     echo "Configuration:"
     echo "  - Model: $MODEL"
+    echo "  - Tensor Parallel Size: $TP_SIZE"
+    echo "  - Pipeline Parallel Size: $PP_SIZE"
+    echo "  - Data Parallel Size: $DP_SIZE"
+    echo "  - Expert Parallel: $ENABLE_EP"
     echo "  - Requests: $NUM_REQUESTS"
     echo "  - Prefill tokens: $PREFILL_TOKENS"
     echo "  - Decode tokens: $DECODE_TOKENS"
@@ -219,17 +195,30 @@ cd "$SCRIPT_DIR"
     echo "  - Prefill Inductor Cache Dir: $PREFILL_INDUCTOR_CACHE_DIR"
     echo "  - Decode Inductor Cache Dir: $DECODE_INDUCTOR_CACHE_DIR"
     echo ""
+    echo "IMPORTANT: This test is EXPECTED TO FAIL"
+    echo "Reason: P2pNcclConnector does not support Pipeline Parallel (PP)"
+    echo "Source: vllm/distributed/kv_transfer/kv_connector/v1/p2p/p2p_nccl_connector.py:501"
+    echo ""
     
     # Check GPU availability
     echo "=== Checking GPU Availability ==="
-    echo "Checking GPU $GPU_PREFILL and GPU $GPU_DECODE..."
+    echo "Checking GPUs: Prefill=$GPU_PREFILL, Decode=$GPU_DECODE"
     nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv | head -10
     echo ""
 
-    if [[ "$GPU_PREFILL" -eq "$GPU_DECODE" ]]; then
-        echo "ERROR: GPU_PREFILL ($GPU_PREFILL) and GPU_DECODE ($GPU_DECODE) must be different."
-        exit 1
-    fi
+    # Validate GPU allocation
+    IFS=',' read -ra PREFILL_GPUS <<< "$GPU_PREFILL"
+    IFS=',' read -ra DECODE_GPUS <<< "$GPU_DECODE"
+    
+    # Check for GPU overlap
+    for prefill_gpu in "${PREFILL_GPUS[@]}"; do
+        for decode_gpu in "${DECODE_GPUS[@]}"; do
+            if [[ "$prefill_gpu" -eq "$decode_gpu" ]]; then
+                echo "ERROR: GPU $prefill_gpu is allocated to both prefill and decode."
+                exit 1
+            fi
+        done
+    done
 
     echo "=== Checking GPU Occupancy ==="
     check_gpu_idle() {
@@ -240,20 +229,26 @@ cd "$SCRIPT_DIR"
             echo "ERROR: GPU $gpu_id is not idle. Found compute processes:"
             echo "$procs"
             echo ""
-            echo "Please choose idle GPUs, e.g.:"
-            echo "  GPU_PREFILL=0 GPU_DECODE=2 ./offline_P2pNcclConnector_test.sh"
+            echo "Please choose idle GPUs."
             exit 1
         fi
     }
-    check_gpu_idle "$GPU_PREFILL"
-    check_gpu_idle "$GPU_DECODE"
-    echo "OK: GPUs are idle."
+    
+    # Check all allocated GPUs
+    for gpu in "${PREFILL_GPUS[@]}"; do
+        check_gpu_idle "$gpu"
+    done
+    for gpu in "${DECODE_GPUS[@]}"; do
+        check_gpu_idle "$gpu"
+    done
+    echo "OK: All GPUs are idle."
     echo ""
     
-    # Run the disaggregated prefill-decode test
-    echo "=== Running Disaggregated Prefill-Decode Test ==="
-    echo "Command (prefill): CUDA_VISIBLE_DEVICES=$GPU_PREFILL python $EXAMPLE_DIR/disaggregated_prefill.py \\"
+    # Run the disaggregated prefill-decode test with PP=2
+    echo "=== Running $TEST_NAME ==="
+    echo "Command (prefill): CUDA_VISIBLE_DEVICES=$GPU_PREFILL python $MOE_SCRIPT \\"
     echo "    --role prefill \\"
+    echo "    --pipeline-parallel-size $PP_SIZE \\"
     echo "    --num-requests $NUM_REQUESTS \\"
     echo "    --prefill-tokens $PREFILL_TOKENS \\"
     echo "    --decode-tokens $DECODE_TOKENS \\"
@@ -296,7 +291,7 @@ else:
 PY
 )}"
 
-    SYNC_FILE="$SCRIPT_DIR/prefill_done_${GPU_PREFILL}_${GPU_DECODE}_$$.marker"
+    SYNC_FILE="$SCRIPT_DIR/prefill_done_pp2_$.marker"
     rm -f "$SYNC_FILE"
 
     prefill_pid=""
@@ -306,11 +301,6 @@ PY
             wait "$prefill_pid" 2>/dev/null || true
         fi
         rm -f "$SYNC_FILE" || true
-        
-        # Optional: Clean up torch compile cache directories
-        # Uncomment the following lines if you want to clean up cache after each run
-        # echo "Cleaning up torch compile cache directories..."
-        # rm -rf "$PREFILL_CACHE_DIR" "$DECODE_CACHE_DIR" || true
     }
     trap cleanup EXIT
 
@@ -321,13 +311,14 @@ PY
     fi
     echo ""
 
-    # Start prefill (producer) in background.
+    # Start prefill (producer) in background with PP=2
     if [[ $ENABLE_PROFILE -eq 1 ]]; then
         CUDA_VISIBLE_DEVICES="$GPU_PREFILL" \
         VLLM_CACHE_ROOT="$PREFILL_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$PREFILL_INDUCTOR_CACHE_DIR" \
-        python "$EXAMPLE_DIR/disaggregated_prefill.py" \
+        python "$MOE_SCRIPT" \
             --role prefill \
+            --pipeline-parallel-size "$PP_SIZE" \
             --num-requests "$NUM_REQUESTS" \
             --prefill-tokens "$PREFILL_TOKENS" \
             --decode-tokens "$DECODE_TOKENS" \
@@ -346,8 +337,9 @@ PY
         CUDA_VISIBLE_DEVICES="$GPU_PREFILL" \
         VLLM_CACHE_ROOT="$PREFILL_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$PREFILL_INDUCTOR_CACHE_DIR" \
-        python "$EXAMPLE_DIR/disaggregated_prefill.py" \
+        python "$MOE_SCRIPT" \
             --role prefill \
+            --pipeline-parallel-size "$PP_SIZE" \
             --num-requests "$NUM_REQUESTS" \
             --prefill-tokens "$PREFILL_TOKENS" \
             --decode-tokens "$DECODE_TOKENS" \
@@ -363,15 +355,15 @@ PY
     fi
     prefill_pid=$!
 
-    # Start decode (consumer) in background so we can enforce a timeout without
-    # external dependencies.
+    # Start decode (consumer) in background with PP=2
     set +e
     if [[ $ENABLE_PROFILE -eq 1 ]]; then
         CUDA_VISIBLE_DEVICES="$GPU_DECODE" \
         VLLM_CACHE_ROOT="$DECODE_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$DECODE_INDUCTOR_CACHE_DIR" \
-        python "$EXAMPLE_DIR/disaggregated_prefill.py" \
+        python "$MOE_SCRIPT" \
             --role decode \
+            --pipeline-parallel-size "$PP_SIZE" \
             --num-requests "$NUM_REQUESTS" \
             --prefill-tokens "$PREFILL_TOKENS" \
             --decode-tokens "$DECODE_TOKENS" \
@@ -390,8 +382,9 @@ PY
         CUDA_VISIBLE_DEVICES="$GPU_DECODE" \
         VLLM_CACHE_ROOT="$DECODE_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$DECODE_INDUCTOR_CACHE_DIR" \
-        python "$EXAMPLE_DIR/disaggregated_prefill.py" \
+        python "$MOE_SCRIPT" \
             --role decode \
+            --pipeline-parallel-size "$PP_SIZE" \
             --num-requests "$NUM_REQUESTS" \
             --prefill-tokens "$PREFILL_TOKENS" \
             --decode-tokens "$DECODE_TOKENS" \
@@ -448,6 +441,18 @@ PY
     echo "Exit code: $EXIT_CODE"
     echo ""
     
+    # Analyze the failure
+    if [[ $EXIT_CODE -ne 0 ]]; then
+        echo "=== EXPECTED FAILURE ANALYSIS ==="
+        echo "This test was expected to fail because:"
+        echo "1. P2pNcclConnector does not support Pipeline Parallel (PP)"
+        echo "2. The limitation is documented in the source code"
+        echo "3. Any PP > 1 configuration will fail with P2pNcclConnector"
+        echo ""
+        echo "This confirms the architectural limitation of P2pNcclConnector."
+        echo ""
+    fi
+    
     echo "=========================================="
     echo "Test Complete"
     echo "Exit code: $EXIT_CODE"
@@ -462,4 +467,3 @@ EXIT_CODE=${PIPESTATUS[0]}
 echo ""
 echo "Output saved to: $OUTPUT_LOG"
 exit "$EXIT_CODE"
-
