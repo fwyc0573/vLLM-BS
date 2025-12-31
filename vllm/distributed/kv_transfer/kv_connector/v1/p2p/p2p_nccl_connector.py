@@ -80,18 +80,21 @@ class P2pNcclConnector(KVConnectorBase_V1):
         self._local_rank = get_world_group().local_rank \
             if role == KVConnectorRole.WORKER else 0
 
-        # Calculate port_offset to avoid port collisions in TP>1 scenarios.
+        # Calculate port_offset to avoid port collisions in TP>1 and DP>1 scenarios.
         # When kv_rank is set (disaggregated mode), we use:
-        #   port_offset = kv_rank * world_size + local_rank
+        #   port_offset = kv_rank * world_size + rank
         # This ensures:
         #   - Different kv_ranks (prefill vs decode) use different port ranges
-        #   - Different local_ranks within the same process use different ports
+        #   - Different ranks within the same process use different ports
+        # Note: We use global rank instead of local_rank because local_rank
+        # is not unique in DP>1 scenarios (different DP ranks can have the
+        # same local_rank, causing port collisions).
         # When kv_rank is not set, fall back to world rank for backward compat.
         if self.config.kv_rank is not None:
             # Get world_size to calculate port range per kv_rank
             world_size = get_world_group().world_size \
                 if role == KVConnectorRole.WORKER else 1
-            port_offset = self.config.kv_rank * world_size + self._local_rank
+            port_offset = self.config.kv_rank * world_size + self._rank
         else:
             port_offset = self._rank
         self.p2p_nccl_engine = P2pNcclEngine(
@@ -282,8 +285,8 @@ class P2pNcclConnector(KVConnectorBase_V1):
             try:
                 ip, port = self.parse_request_id(request_id, True)
                 # When request_id contains address info, use the parsed port
-                # with local_rank offset for TP>1 scenarios
-                remote_address = ip + ":" + str(port + self._local_rank)
+                # with rank offset for TP>1 and DP>1 scenarios
+                remote_address = ip + ":" + str(port + self._rank)
             except ValueError:
                 # Offline examples do not embed host/port in request ids.
                 # Fall back to the configured KV IP/port with port offset
@@ -293,8 +296,9 @@ class P2pNcclConnector(KVConnectorBase_V1):
                     1, int(self.config.kv_parallel_size))
                 # Calculate remote port offset using the same logic as __init__
                 # to ensure prefill can correctly address decode workers.
+                # Use global rank instead of local_rank for DP>1 compatibility.
                 world_size = get_world_group().world_size
-                remote_port_offset = peer_rank * world_size + self._local_rank
+                remote_port_offset = peer_rank * world_size + self._rank
                 remote_address = base_ip + ":" + str(int(self.config.kv_port) + remote_port_offset)
 
             kv_cache = extract_kv_from_layer(kv_layer, request.block_ids)

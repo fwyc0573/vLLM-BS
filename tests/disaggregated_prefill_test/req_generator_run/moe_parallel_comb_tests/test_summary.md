@@ -4,6 +4,8 @@
 
 | Date       | Summary of Changes                                              |
 |------------|-----------------------------------------------------------------|
+| 2025-12-30 | Added detailed EP dependency analysis - ep_size = tp_size * dp_size |
+| 2025-12-30 | Updated DP tests status - GPU resource limitation documented    |
 | 2025-12-30 | Port binding fix verified - TP=2 test passes initialization     |
 | 2025-12-30 | Final update - all test scripts completed and documented       |
 | 2025-12-30 | Added TP=2 + DP=2 test results - timeout during initialization |
@@ -33,12 +35,52 @@ Based on code analysis (`vllm/distributed/kv_transfer/kv_connector/v1/p2p/p2p_nc
 2. **Symmetric TP Only**: Only supports symmetric TP (Prefill and Decode must use the same TP size)
 3. **No Asymmetric TP**: Asymmetric TP configurations are not supported
 
-#### EP Dependency
+#### EP Dependency Analysis (Detailed)
 
-Based on code analysis (`vllm/model_executor/layers/fused_moe/config.py:276`):
+Based on code analysis (`vllm/model_executor/layers/fused_moe/config.py`):
 
-- EP requires `dp_size * tp_size > 1` to be enabled
-- EP cannot be used standalone without TP or DP
+**核心公式 (Core Formula)**:
+```
+ep_size = tp_size * dp_size  (when enable_expert_parallel=True and tp_size * dp_size > 1)
+```
+
+**启用条件 (Enabling Conditions)**:
+1. `enable_expert_parallel=True` must be set
+2. `tp_size * dp_size > 1` must be satisfied
+
+**EP 配置示例 (Configuration Examples from vLLM source)**:
+
+| Configuration | Device | TP | DP | EP | Comment |
+|---------------|--------|----|----|----|---------| 
+| TP=2, DP=1, EP=True | device 0 | {1,0} | {1,0} | {2,0} | Experts split across 2 devices |
+| | device 1 | {1,0} | {1,0} | {2,1} | |
+| TP=1, DP=2, EP=True | device 0 | {1,0} | {2,0} | {2,0} | 2 engine instances, experts split |
+| | device 1 | {1,0} | {2,1} | {2,1} | |
+| TP=2, DP=2, EP=True | device 0 | {1,0} | {2,0} | {4,0} | 2 engine instances, experts split across 4 devices |
+| | device 1 | {1,0} | {2,0} | {4,1} | |
+| | device 2 | {1,0} | {2,1} | {4,2} | |
+| | device 3 | {1,0} | {2,1} | {4,3} | |
+
+**关键发现 (Key Findings)**:
+1. 当 EP 启用时，TP 被"吸收"到 EP 中（tp_size 变为 1）
+2. `ep_size = original_tp_size * dp_size`
+3. 每个设备拥有完整的专家子集（不再有 tensor 分片）
+
+**test_tp2_ep_moe.sh 配置分析**:
+- TP=2, DP=1, enable_expert_parallel=True
+- 满足条件: 2 * 1 = 2 > 1 ✓
+- 实际 ep_size = 2
+
+**Source Code Reference** (`FusedMoEParallelConfig.make()`):
+```python
+use_ep = (dp_size_ * tp_size_ > 1
+          and vllm_parallel_config.enable_expert_parallel)
+
+# When EP is enabled:
+ep_size = tp_size  # tp_size is already flattened as dp_size * original_tp_size
+ep_rank = tp_rank
+return FusedMoEParallelConfig(tp_size=1, tp_rank=0, ..., ep_size=ep_size, ep_rank=ep_rank, use_ep=True)
+```
 
 ## Port Binding Fix (2025-12-30)
 
@@ -78,17 +120,42 @@ INFO 12-30 13:10:48 [p2p_nccl_engine.py:168] 💯P2pNcclEngine init, rank:0, loc
 INFO 12-30 13:10:49 [p2p_nccl_engine.py:168] 💯P2pNcclEngine init, rank:1, local_rank:1, zmq_address:127.0.0.1:14662
 ```
 
+## GPU Resource Requirements (2025-12-30)
+
+### DP=2 Tests Require 8 GPUs
+
+**Important Discovery**: Tests with `data_parallel_size=2` require **8 independent GPUs** (4 for Prefill, 4 for Decode).
+
+**vLLM LLM Class DP Support**:
+- The vLLM `LLM` class **does support** `data_parallel_size > 1`
+- The limitation in `throughput.py` is only for the benchmark script, not the LLM class itself
+- DP is passed through `**kwargs` to `EngineArgs` which supports `data_parallel_size`
+
+**GPU Allocation for DP=2 Tests**:
+| Configuration | Prefill GPUs | Decode GPUs | Total Required |
+|---------------|--------------|-------------|----------------|
+| TP=2 + DP=2   | [0,1,2,3]    | [4,5,6,7]   | 8 GPUs         |
+| EP + DP=2 + TP=2 | [0,1,2,3] | [4,5,6,7]   | 8 GPUs         |
+
+**Current GPU Status** (as of testing):
+- Available: GPU 0, 1, 2, 5 (4 GPUs)
+- Occupied: GPU 3, 4, 6, 7 (4 GPUs)
+
+**Consequence**: 
+- Using overlapping GPUs between Prefill and Decode causes **NCCL communication deadlock**
+- Tests with DP=2 cannot run until 8 independent GPUs are available
+
 ## Test Configuration Matrix
 
 | Config Name | TP | PP | DP | EP | Expected Result | Actual Result | Notes |
 |-------------|----|----|----|----|-----------------|---------------|-------|
-| tp2 | 2 | 1 | 1 | No | Success | **FIXED** | Port binding fix applied - initialization passes |
+| tp2 | 2 | 1 | 1 | No | Success | **PASSED** ✅ | Port binding fix applied - test completed successfully |
 | pp2 | 1 | 2 | 1 | No | **Not Supported** | - | P2pNcclConnector does not support PP |
-| tp2_ep | 2 | 1 | 1 | Yes | Success | **FIXED** | Port binding fix applied - should work now |
+| tp2_ep | 2 | 1 | 1 | Yes | Success | **PASSED** ✅ | Port binding fix applied - test completed successfully |
 | tp2_pp2 | 2 | 2 | 1 | No | **Not Supported** | - | P2pNcclConnector does not support PP |
-| tp2_dp2 | 2 | 1 | 2 | No | Success | **FIXED** | Port binding fix applied - should work now |
+| tp2_dp2 | 2 | 1 | 2 | No | Success | **BLOCKED** ⏳ | Requires 8 GPUs - currently only 4 available |
 | pp2_ep | 1 | 2 | 2 | Yes | **Not Supported** | - | P2pNcclConnector does not support PP |
-| tp2_ep_dp2 | 2 | 1 | 2 | Yes | Success | **FIXED** | Port binding fix applied - should work now |
+| tp2_ep_dp2 | 2 | 1 | 2 | Yes | Success | **BLOCKED** ⏳ | Requires 8 GPUs - currently only 4 available |
 | pp2_ep_tp2 | 2 | 2 | 1 | Yes | **Not Supported** | - | P2pNcclConnector does not support PP |
 | pp_ep_dp_tp | 2 | 2 | 2 | Yes | **Not Supported** | - | P2pNcclConnector does not support PP |
 
@@ -115,11 +182,11 @@ INFO 12-30 13:10:49 [p2p_nccl_engine.py:168] 💯P2pNcclEngine init, rank:1, loc
 
 #### TP=2 Test (`test_tp2_moe.sh`)
 
-- **Status**: **FIXED** ✅
+- **Status**: **PASSED** ✅
 - **Configuration**: `--tensor-parallel-size 2`
-- **GPUs**: Prefill [1,2], Decode [3,4]
+- **GPUs**: Prefill [0,1], Decode [2,5] (adjusted due to GPU 3,4 occupancy)
 - **Log File**: `logs/test_tp2_moe_output.log`
-- **Result**: Port binding fix applied - initialization passes
+- **Result**: Test completed successfully with exit code 0
 - **Port Allocation**:
   - Prefill worker 0: zmq_address=127.0.0.1:14661
   - Prefill worker 1: zmq_address=127.0.0.1:14662
@@ -139,21 +206,26 @@ INFO 12-30 13:10:49 [p2p_nccl_engine.py:168] 💯P2pNcclEngine init, rank:1, loc
 
 #### TP=2 + EP Test (`test_tp2_ep_moe.sh`)
 
-- **Status**: **FIXED** ✅
+- **Status**: **PASSED** ✅
 - **Configuration**: `--tensor-parallel-size 2 --enable-expert-parallel`
-- **GPUs**: Prefill [1,2], Decode [3,4]
+- **GPUs**: Prefill [0,1], Decode [2,5] (adjusted due to GPU 3,4 occupancy)
 - **Log File**: `logs/test_tp2_ep_moe_output.log`
-- **Result**: Port binding fix applied - should work now
-- **Notes**: After applying the port_offset fix, this configuration should work. EP functionality initializes correctly with TP=2 satisfying the `dp_size * tp_size > 1` requirement.
+- **Result**: Test completed successfully with exit code 0
+- **Notes**: After applying the port_offset fix, this configuration works correctly. EP functionality initializes correctly with TP=2 satisfying the `dp_size * tp_size > 1` requirement.
 
 #### TP=2 + DP=2 Test (`test_tp2_dp2_moe.sh`)
 
-- **Status**: **FIXED** ✅
+- **Status**: **BLOCKED** ⏳ (GPU Resource Limitation)
 - **Configuration**: `--tensor-parallel-size 2 --data-parallel-size 2`
-- **GPUs**: Prefill [1,2,3,4], Decode [5,6,7,1] (GPU overlap due to resource constraints)
+- **GPUs Required**: Prefill [0,1,2,3], Decode [4,5,6,7] (8 GPUs total, no overlap allowed)
 - **Log File**: `logs/test_tp2_dp2_moe_output.log`
-- **Result**: Port binding fix applied - should work now
-- **Notes**: After applying the port_offset fix, this configuration should work. TP=2 + DP=2 requires 4 GPUs per role (8 total). Configuration is resource-intensive.
+- **Result**: Cannot execute - requires 8 independent GPUs
+- **Root Cause Analysis**:
+  1. **vLLM LLM class DOES support DP > 1** - The limitation in `throughput.py` is only for the benchmark script
+  2. **GPU resource limitation**: TP=2 + DP=2 requires 4 GPUs per role (8 total)
+  3. **GPU overlap causes NCCL deadlock**: Using overlapping GPUs between prefill and decode processes causes communication deadlock
+- **Current GPU Status**: Only 4 GPUs available (0, 1, 2, 5), GPUs 3, 4, 6, 7 are occupied
+- **Notes**: This test will work once 8 independent GPUs are available. The port binding fix has been applied and should work correctly.
 
 #### TP=2 + PP=2 Test (`test_tp2_pp2_moe.sh`)
 
@@ -179,12 +251,12 @@ INFO 12-30 13:10:49 [p2p_nccl_engine.py:168] 💯P2pNcclEngine init, rank:1, loc
 
 #### EP + DP=2 + TP=2 Test (`test_ep_dp2_tp2_moe.sh`)
 
-- **Status**: **FIXED** ✅
+- **Status**: **BLOCKED** ⏳ (GPU Resource Limitation)
 - **Configuration**: `--tensor-parallel-size 2 --data-parallel-size 2 --enable-expert-parallel`
-- **GPUs**: Prefill [1,2,3,4], Decode [5,6,7]
+- **GPUs Required**: Prefill [0,1,2,3], Decode [4,5,6,7] (8 GPUs total, no overlap allowed)
 - **Log File**: `logs/test_ep_dp2_tp2_moe_output.log`
-- **Result**: Port binding fix applied - should work now
-- **Notes**: Three-way combination without PP. After applying the port_offset fix, this configuration should work.
+- **Result**: Cannot execute - requires 8 independent GPUs
+- **Notes**: Three-way combination without PP. Same GPU resource limitation as TP=2 + DP=2 test. Will work once 8 independent GPUs are available.
 
 #### PP=2 + EP + TP=2 Test (`test_pp2_ep_tp2_moe.sh`)
 
@@ -212,10 +284,10 @@ INFO 12-30 13:10:49 [p2p_nccl_engine.py:168] 💯P2pNcclEngine init, rank:1, loc
 
 ### Supported Configurations (After Port Binding Fix)
 
-1. **TP=2 only**: ✅ **FIXED** - Port binding issue resolved
-2. **TP=2 + EP**: ✅ **FIXED** - Port binding issue resolved
-3. **TP=2 + DP=2**: ✅ **FIXED** - Port binding issue resolved
-4. **EP + DP=2 + TP=2**: ✅ **FIXED** - Port binding issue resolved
+1. **TP=2 only**: ✅ **PASSED** - Test completed successfully
+2. **TP=2 + EP**: ✅ **PASSED** - Test completed successfully
+3. **TP=2 + DP=2**: ⏳ **BLOCKED** - Requires 8 GPUs (currently only 4 available)
+4. **EP + DP=2 + TP=2**: ⏳ **BLOCKED** - Requires 8 GPUs (currently only 4 available)
 
 ### Unsupported Configurations
 

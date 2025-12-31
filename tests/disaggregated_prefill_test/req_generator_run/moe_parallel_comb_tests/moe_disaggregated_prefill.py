@@ -143,7 +143,23 @@ def _generate_workload_prompts(args: argparse.Namespace,
 
 
 def run_prefill(args: argparse.Namespace):
-    """Run prefill (producer) role."""
+    """Run prefill (producer) role.
+    
+    IMPORTANT: P2pNcclConnector uses NCCL for point-to-point communication,
+    which requires both sender (prefill) and receiver (decode) to participate
+    in the communication simultaneously. Therefore, prefill and decode must
+    call generate() at the same time to avoid NCCL blocking/timeout.
+    
+    Synchronization flow:
+    1. Prefill waits for decode_ready (decode LLM initialized)
+    2. Prefill signals prefill_ready (prefill LLM initialized)
+    3. Decode sees prefill_ready and starts warmup generate
+    4. Prefill starts warmup generate (both execute simultaneously)
+    5. After warmup, prefill signals prefill_warmup_done
+    6. Decode sees prefill_warmup_done and starts actual generate
+    7. Prefill starts actual generate (both execute simultaneously)
+    8. Prefill signals prefill_done when finished
+    """
     import torch
     from vllm import LLM, SamplingParams
     from vllm.config import KVTransferConfig
@@ -159,11 +175,15 @@ def run_prefill(args: argparse.Namespace):
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=1)
 
     # Using P2pNcclConnector to transmit KV caches between vLLM instances.
-    # This instance is the prefill node (kv_producer, rank 0).
+    # This instance is the prefill node (kv_producer).
+    # NOTE: kv_rank is set to 1 because in DP mode, the decode process
+    # typically initializes first and gets the lower port range (kv_rank=0).
+    # The prefill process initializes later and gets the higher port range.
+    # This ensures the port allocation matches the actual initialization order.
     ktc = KVTransferConfig(
         kv_connector="P2pNcclConnector",
         kv_role="kv_producer",
-        kv_rank=0,
+        kv_rank=1,  # Prefill uses higher port range
         kv_parallel_size=2,
         kv_port=args.kv_port,
     )
@@ -180,21 +200,46 @@ def run_prefill(args: argparse.Namespace):
         enforce_eager=False,
     )
 
-    # Wait for decode to be ready before warmup (to avoid NCCL hang)
-    # The decode process creates a "decode_ready" file after LLM initialization
+    # Define sync file paths
     decode_ready_file = args.sync_file.replace("prefill_done", "decode_ready")
+    prefill_ready_file = args.sync_file.replace("prefill_done", "prefill_ready")
+    prefill_warmup_done_file = args.sync_file.replace("prefill_done", "prefill_warmup_done")
+
+    # Wait for decode to be ready (LLM initialized)
     print(f"[PREFILL] Waiting for decode to be ready (sync file: {decode_ready_file})")
     start_time = time.time()
     while not os.path.exists(decode_ready_file):
         if time.time() - start_time > args.prefill_timeout:
             raise TimeoutError(f"Decode did not become ready within {args.prefill_timeout} seconds")
         time.sleep(0.1)
-    print("[PREFILL] Decode is ready, starting warmup...")
+    print("[PREFILL] Decode is ready.")
 
+    # Signal that prefill is ready
+    print(f"[PREFILL] Signaling prefill ready (sync file: {prefill_ready_file})")
+    with open(prefill_ready_file, "w") as f:
+        f.write("prefill_ready\n")
+
+    # Small delay to ensure decode sees the signal and starts warmup
+    time.sleep(0.5)
+
+    # Start warmup - decode should be executing warmup generate simultaneously
+    print("[PREFILL] Starting warmup...")
     for _ in range(args.warmup_iters):
         llm.generate(warmup_prompts, sampling_params)
+    print("[PREFILL] Warmup completed.")
+
+    # Signal warmup done
+    print(f"[PREFILL] Signaling warmup done (sync file: {prefill_warmup_done_file})")
+    with open(prefill_warmup_done_file, "w") as f:
+        f.write("prefill_warmup_done\n")
+
+    # Small delay to ensure decode sees the signal and starts actual generate
+    time.sleep(0.5)
+
+    # Start actual prefill - decode should be executing generate simultaneously
     if args.profile:
         llm.start_profile()
+    print("[PREFILL] Starting actual prefill generation...")
     with record_function_or_nullcontext("e2e_llm_generate_prefill"):
         wall_start = time.perf_counter()
         llm.generate(prompts, sampling_params)
@@ -206,6 +251,8 @@ def run_prefill(args: argparse.Namespace):
     print(f"[PREFILL] Total generation wall-clock time: {prefill_wall_time:.6f} seconds",
           flush=True)
     print("Prefill node is finished.", flush=True)
+    
+    # Signal prefill done
     if os.path.exists(args.sync_file):
         raise RuntimeError(
             f"Sync file already exists: {args.sync_file}. Please remove it "
@@ -223,7 +270,21 @@ def run_prefill(args: argparse.Namespace):
 
 
 def run_decode(args: argparse.Namespace):
-    """Run decode (consumer) role."""
+    """Run decode (consumer) role.
+    
+    IMPORTANT: P2pNcclConnector uses NCCL for point-to-point communication,
+    which requires both sender (prefill) and receiver (decode) to participate
+    in the communication simultaneously. Therefore, prefill and decode must
+    call generate() at the same time to avoid NCCL blocking/timeout.
+    
+    Synchronization flow:
+    1. Decode initializes LLM and signals decode_ready
+    2. Decode waits for prefill_ready (prefill LLM initialized)
+    3. Decode starts warmup generate (prefill does the same simultaneously)
+    4. Decode waits for prefill_warmup_done
+    5. Decode starts actual generate (prefill does the same simultaneously)
+    6. Decode waits for prefill_done to confirm completion
+    """
     import torch
     from vllm import LLM, SamplingParams
     from vllm.config import KVTransferConfig
@@ -242,11 +303,14 @@ def run_decode(args: argparse.Namespace):
     sampling_params = SamplingParams(temperature=0, top_p=0.95, max_tokens=max_tokens)
 
     # Using P2pNcclConnector to receive KV caches from prefill instance.
-    # This instance is the decode node (kv_consumer, rank 1).
+    # This instance is the decode node (kv_consumer).
+    # NOTE: kv_rank is set to 0 because in DP mode, the decode process
+    # typically initializes first and gets the lower port range.
+    # This ensures the port allocation matches the actual initialization order.
     ktc = KVTransferConfig(
         kv_connector="P2pNcclConnector",
         kv_role="kv_consumer",
-        kv_rank=1,
+        kv_rank=0,  # Decode uses lower port range
         kv_parallel_size=2,
         kv_port=args.kv_port,
     )
@@ -263,26 +327,51 @@ def run_decode(args: argparse.Namespace):
         enforce_eager=False,
     )
 
-    # Signal that decode is ready (LLM and P2pNcclEngine initialized)
-    # This allows prefill to start warmup without NCCL hang
+    # Define sync file paths
     decode_ready_file = args.sync_file.replace("prefill_done", "decode_ready")
+    prefill_ready_file = args.sync_file.replace("prefill_done", "prefill_ready")
+    prefill_warmup_done_file = args.sync_file.replace("prefill_done", "prefill_warmup_done")
+
+    # Signal that decode is ready (LLM and P2pNcclEngine initialized)
     print(f"[DECODE] LLM initialized, signaling ready (sync file: {decode_ready_file})")
     with open(decode_ready_file, "w") as f:
         f.write("decode_ready\n")
 
-    # Wait for prefill to complete
-    print(f"[DECODE] Waiting for prefill completion (sync file: {args.sync_file})")
+    # Wait for prefill to be ready
+    print(f"[DECODE] Waiting for prefill to be ready (sync file: {prefill_ready_file})")
     start_time = time.time()
-    while not os.path.exists(args.sync_file):
+    while not os.path.exists(prefill_ready_file):
         if time.time() - start_time > args.prefill_timeout:
-            raise TimeoutError(f"Prefill did not complete within {args.prefill_timeout} seconds")
+            raise TimeoutError(f"Prefill did not become ready within {args.prefill_timeout} seconds")
         time.sleep(0.1)
-    print("[DECODE] Prefill completed, starting decode...")
+    print("[DECODE] Prefill is ready.")
 
+    # Small delay to ensure prefill starts warmup
+    time.sleep(0.5)
+
+    # Start warmup - prefill should be executing warmup generate simultaneously
+    # This is CRITICAL: decode must call generate() to receive KV cache from prefill
+    print("[DECODE] Starting warmup (receiving KV cache from prefill)...")
     for _ in range(args.warmup_iters):
         llm.generate(warmup_prompts, sampling_params)
+    print("[DECODE] Warmup completed.")
+
+    # Wait for prefill warmup to complete
+    print(f"[DECODE] Waiting for prefill warmup to complete (sync file: {prefill_warmup_done_file})")
+    start_time = time.time()
+    while not os.path.exists(prefill_warmup_done_file):
+        if time.time() - start_time > args.prefill_timeout:
+            raise TimeoutError(f"Prefill warmup did not complete within {args.prefill_timeout} seconds")
+        time.sleep(0.1)
+    print("[DECODE] Prefill warmup completed.")
+
+    # Small delay to ensure prefill starts actual generate
+    time.sleep(0.5)
+
+    # Start actual decode - prefill should be executing generate simultaneously
     if args.profile:
         llm.start_profile()
+    print("[DECODE] Starting actual decode generation (receiving KV cache from prefill)...")
     with record_function_or_nullcontext("e2e_llm_generate_decode"):
         wall_start = time.perf_counter()
         outputs = llm.generate(prompts, sampling_params)

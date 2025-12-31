@@ -30,7 +30,7 @@ ENABLE_EP=false
 
 # GPU allocation for TP=2: Prefill uses [1,2], Decode uses [3,4]
 GPU_PREFILL="1,2"
-GPU_DECODE="3,4"
+GPU_DECODE="6,7"
 
 # Default parameters (can be overridden via command line or environment variables)
 NUM_REQUESTS=${NUM_REQUESTS:-8}

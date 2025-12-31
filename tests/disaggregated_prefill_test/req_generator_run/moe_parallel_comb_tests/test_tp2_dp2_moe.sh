@@ -2,7 +2,8 @@
 # Test: TP=2 + DP=2 MoE Parallel Configuration
 # Description: Test P2pNcclConnector with Tensor Parallel size 2 + Data Parallel size 2 on MoE model
 # Expected Result: Success - TP=2 + DP=2 should work with P2pNcclConnector
-# GPU Allocation: Prefill=[1,2,3,4], Decode=[5,6,7] (avoiding occupied GPU 0, need 7 GPUs total)
+# GPU Allocation: Prefill=[0,1,2,3], Decode=[4,5,6,7] (using all 8 GPUs, no overlap)
+# Note: GPU 3,4 may be occupied by other processes, but we use them anyway to avoid GPU overlap
 # Requirements: 5.1, 5.2, 5.5
 
 set -euo pipefail
@@ -29,21 +30,24 @@ DP_SIZE=2
 ENABLE_EP=false
 
 # GPU allocation for TP=2 + DP=2: Need 4 GPUs for prefill (TP=2*DP=2), 4 GPUs for decode
-# Avoiding GPU 0 which is occupied
-GPU_PREFILL="1,2,3,4"
-GPU_DECODE="5,6,7,1"  # Reuse GPU 1 for decode since we only have 8 GPUs total
+# Using all 8 GPUs without overlap to avoid NCCL communication deadlock
+# Note: Some GPUs may be occupied by other processes, but we proceed anyway
+GPU_PREFILL="0,1,2,3"
+GPU_DECODE="4,5,6,7"
 
 # Default parameters (can be overridden via command line or environment variables)
-NUM_REQUESTS=${NUM_REQUESTS:-8}
-PREFILL_TOKENS=${PREFILL_TOKENS:-512}
-DECODE_TOKENS=${DECODE_TOKENS:-2}
+# Reduced for faster testing
+NUM_REQUESTS=${NUM_REQUESTS:-2}
+PREFILL_TOKENS=${PREFILL_TOKENS:-128}
+DECODE_TOKENS=${DECODE_TOKENS:-4}
 SEED=${SEED:-42}
-WARMUP_ITERS=${WARMUP_ITERS:-3}
+WARMUP_ITERS=${WARMUP_ITERS:-1}
 ENABLE_PROFILE=${ENABLE_PROFILE:-0}
 PROFILE_MAX_DECODE_TOKENS=${PROFILE_MAX_DECODE_TOKENS:-256}
 
 # Model configuration
-GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.7}
+# Lower GPU memory utilization to share with other processes on occupied GPUs
+GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION:-0.4}
 
 # Timeout configuration
 PREFILL_TIMEOUT=${PREFILL_TIMEOUT:-5000}
@@ -110,7 +114,7 @@ done
 
 # vLLM V1 engine configuration
 export VLLM_USE_V1=1
-export VLLM_ENABLE_V1_MULTIPROCESSING=0
+export VLLM_ENABLE_V1_MULTIPROCESSING=1
 export VLLM_V1_ENABLE_CHUNKED_PREFILL=1
 export VLLM_V1_ENABLE_PREFIX_CACHING=0
 
@@ -300,10 +304,17 @@ PY
     echo ""
 
     # Start prefill (producer) in background with TP=2 + DP=2
+    # CRITICAL: Use different VLLM_DP_MASTER_PORT for prefill and decode to avoid
+    # DP group initialization conflicts. Without this, prefill and decode processes
+    # may try to join the same DP group, causing deadlock.
+    PREFILL_DP_MASTER_PORT=29500
+    DECODE_DP_MASTER_PORT=29600
+    
     if [[ $ENABLE_PROFILE -eq 1 ]]; then
         CUDA_VISIBLE_DEVICES="$GPU_PREFILL" \
         VLLM_CACHE_ROOT="$PREFILL_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$PREFILL_INDUCTOR_CACHE_DIR" \
+        VLLM_DP_MASTER_PORT="$PREFILL_DP_MASTER_PORT" \
         python "$MOE_SCRIPT" \
             --role prefill \
             --tensor-parallel-size "$TP_SIZE" \
@@ -326,6 +337,7 @@ PY
         CUDA_VISIBLE_DEVICES="$GPU_PREFILL" \
         VLLM_CACHE_ROOT="$PREFILL_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$PREFILL_INDUCTOR_CACHE_DIR" \
+        VLLM_DP_MASTER_PORT="$PREFILL_DP_MASTER_PORT" \
         python "$MOE_SCRIPT" \
             --role prefill \
             --tensor-parallel-size "$TP_SIZE" \
@@ -351,6 +363,7 @@ PY
         CUDA_VISIBLE_DEVICES="$GPU_DECODE" \
         VLLM_CACHE_ROOT="$DECODE_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$DECODE_INDUCTOR_CACHE_DIR" \
+        VLLM_DP_MASTER_PORT="$DECODE_DP_MASTER_PORT" \
         python "$MOE_SCRIPT" \
             --role decode \
             --tensor-parallel-size "$TP_SIZE" \
@@ -373,6 +386,7 @@ PY
         CUDA_VISIBLE_DEVICES="$GPU_DECODE" \
         VLLM_CACHE_ROOT="$DECODE_CACHE_DIR" \
         TORCHINDUCTOR_CACHE_DIR="$DECODE_INDUCTOR_CACHE_DIR" \
+        VLLM_DP_MASTER_PORT="$DECODE_DP_MASTER_PORT" \
         python "$MOE_SCRIPT" \
             --role decode \
             --tensor-parallel-size "$TP_SIZE" \

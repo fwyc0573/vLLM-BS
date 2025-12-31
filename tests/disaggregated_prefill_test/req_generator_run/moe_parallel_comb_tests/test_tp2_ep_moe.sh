@@ -28,9 +28,9 @@ PP_SIZE=1
 DP_SIZE=1
 ENABLE_EP=true
 
-# GPU allocation for TP=2 + EP: Prefill uses [1,2], Decode uses [3,4] (avoiding occupied GPU 0)
-GPU_PREFILL="1,2"
-GPU_DECODE="3,4"
+# GPU allocation for TP=2 + EP: Prefill uses [0,1], Decode uses [2,5] (using available GPUs)
+GPU_PREFILL="0,1"
+GPU_DECODE="2,5"
 
 # Default parameters (can be overridden via command line or environment variables)
 NUM_REQUESTS=${NUM_REQUESTS:-8}

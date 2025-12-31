@@ -672,7 +672,9 @@ class Worker(WorkerBase):
             tensorizer_config=tensorizer_config, )
 
     def shutdown(self) -> None:
-        self.model_runner.ensure_kv_transfer_shutdown()
+        # Guard against model_runner being None if initialization failed
+        if self.model_runner is not None:
+            self.model_runner.ensure_kv_transfer_shutdown()
 
 
 def init_worker_distributed_environment(
