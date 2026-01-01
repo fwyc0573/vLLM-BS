@@ -36,10 +36,10 @@ set -euo pipefail
 # ============================================================================
 
 # Frontier path for request generator
-export FRONTIER_PATH="/research/d1/gds/ytyang/yichengfeng/frontier"
+export FRONTIER_PATH="/local/ycfeng/frontier"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm"
+PROJECT_ROOT="/local/ycfeng/frontier/sota-infer-engine/vllm"
 EXAMPLE_DIR="$PROJECT_ROOT/examples/offline_inference"
 OUTPUT_LOG="$SCRIPT_DIR/p2p_nccl_connector_test_output.log"
 
@@ -179,7 +179,7 @@ mkdir -p "$PREFILL_INDUCTOR_CACHE_DIR" "$DECODE_INDUCTOR_CACHE_DIR"
 # Conda Environment
 # ============================================================================
 
-source /research/d1/gds/ytyang/anaconda3/etc/profile.d/conda.sh
+source /local/ycfeng/anaconda3/etc/profile.d/conda.sh
 conda activate vllm-bs-0.10.2
 
 # ============================================================================
