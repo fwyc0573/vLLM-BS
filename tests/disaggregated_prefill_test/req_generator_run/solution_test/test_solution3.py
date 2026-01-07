@@ -3,7 +3,10 @@
 
 import os
 import sys
-sys.path.insert(0, "/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm")
+# Dynamically resolve vLLM path
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_VLLM_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_SCRIPT_DIR))))))
+sys.path.insert(0, _VLLM_PATH)
 
 from vllm.request_generator import (
     VLLMRequestGenerator,

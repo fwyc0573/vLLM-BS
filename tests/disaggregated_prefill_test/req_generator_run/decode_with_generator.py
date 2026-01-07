@@ -12,8 +12,8 @@ import json
 import os
 import sys
 
-# Add vLLM to path if needed
-VLLM_PATH = "/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm"
+# Add vLLM to path if needed - dynamically resolve path
+VLLM_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 if VLLM_PATH not in sys.path:
     sys.path.insert(0, VLLM_PATH)
 

@@ -23,12 +23,14 @@ from vllm.request_generator.config import (
 from vllm.request_generator.prompt_generator import PromptGenerator
 
 
-# Default Frontier path
+# Default Frontier path - dynamically resolve from vllm location
 # Can be overridden by:
 # 1. Setting config.frontier_path in RequestGeneratorConfig
 # 2. Setting FRONTIER_PATH environment variable
 # Example: export FRONTIER_PATH=/path/to/frontier
-DEFAULT_FRONTIER_PATH = "/research/d1/gds/ytyang/yichengfeng/frontier"
+# Path structure: frontier/sota-infer-engine/vllm/vllm/request_generator/vllm_request_generator.py
+_VLLM_REQUEST_GEN_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_FRONTIER_PATH = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(_VLLM_REQUEST_GEN_DIR)))))
 
 
 def _resolve_frontier_path(config_path: Optional[str] = None) -> str:

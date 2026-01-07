@@ -4,8 +4,9 @@
 import sys
 import os
 
-# Redirect output to file
-output_file = "/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/import_test_output.txt"
+# Redirect output to file - dynamically resolve path
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+output_file = os.path.join(_script_dir, "import_test_output.txt")
 sys.stdout = open(output_file, 'w')
 sys.stderr = sys.stdout
 
