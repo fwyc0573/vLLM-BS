@@ -3,12 +3,17 @@
 
 import gc
 import itertools
+import os
 import time
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
+
+# Frontier comparison instrumentation flag
+FRONTIER_INSTRUMENTATION_ENABLED = os.environ.get(
+    "VLLM_FRONTIER_INSTRUMENTATION", "0") == "1"
 
 import numpy as np
 import torch
@@ -402,6 +407,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             dtype=torch.int64,
             device="cpu",
             pin_memory=self.pin_memory)
+
+        # Frontier comparison instrumentation
+        if FRONTIER_INSTRUMENTATION_ENABLED:
+            self._frontier_forward_start_event = torch.cuda.Event(
+                enable_timing=True)
+            self._frontier_forward_end_event = torch.cuda.Event(
+                enable_timing=True)
+            self._frontier_batch_metrics: list[dict] = []
+            self._frontier_batch_id = 0
+            logger.info("Frontier instrumentation enabled")
 
     def _make_buffer(self,
                      *size: Union[int, torch.SymInt],
@@ -2051,6 +2066,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Run the model.
         # Use persistent buffers for CUDA graphs.
+        # Frontier instrumentation: record start event
+        if FRONTIER_INSTRUMENTATION_ENABLED:
+            self._frontier_forward_start_event.record()
+
         with (set_forward_context(
                 attn_metadata,
                 self.vllm_config,
@@ -2068,6 +2087,21 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
+
+        # Frontier instrumentation: record end event and collect metrics
+        if FRONTIER_INSTRUMENTATION_ENABLED:
+            self._frontier_forward_end_event.record()
+            torch.cuda.synchronize()
+            forward_time_ms = self._frontier_forward_start_event.elapsed_time(
+                self._frontier_forward_end_event)
+            self._frontier_batch_metrics.append({
+                "batch_id": self._frontier_batch_id,
+                "batch_size": self.input_batch.num_reqs,
+                "batch_num_tokens": num_input_tokens,
+                "batch_execution_time": forward_time_ms,
+                "timestamp": time.time(),
+            })
+            self._frontier_batch_id += 1
 
         with record_function_or_nullcontext("Postprocess"):
             if self.use_aux_hidden_state_outputs:
@@ -2178,6 +2212,26 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             draft_token_ids = self._draft_token_ids
         self._draft_token_ids = None
         return DraftTokenIds(req_ids, draft_token_ids)
+
+    def get_frontier_batch_metrics(self) -> list[dict]:
+        """Get collected batch metrics for Frontier comparison.
+
+        Returns a list of batch metrics dictionaries, each containing:
+        - batch_id: Sequential batch identifier
+        - batch_size: Number of requests in the batch
+        - batch_num_tokens: Total tokens in the batch
+        - batch_execution_time: Forward pass time in milliseconds
+        - timestamp: Unix timestamp when the batch was processed
+        """
+        if not FRONTIER_INSTRUMENTATION_ENABLED:
+            return []
+        return self._frontier_batch_metrics
+
+    def clear_frontier_batch_metrics(self):
+        """Clear collected batch metrics."""
+        if FRONTIER_INSTRUMENTATION_ENABLED:
+            self._frontier_batch_metrics = []
+            self._frontier_batch_id = 0
 
     def propose_draft_token_ids(
         self,

@@ -13,6 +13,24 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class FrontierRequestMetrics:
+    """Request-level metrics compatible with Frontier simulator format.
+
+    These metrics are designed to match Frontier's request_metrics.csv schema
+    for direct comparison between vLLM and Frontier simulation results.
+    """
+    request_id: str = ""
+    request_e2e_time: float = 0.0  # End-to-end latency in ms
+    ttft: float = 0.0  # Time to first token in ms
+    tpot: float = 0.0  # Time per output token in ms
+    request_model_execution_time: float = 0.0  # Pure forward pass time in ms
+    request_num_prefill_tokens: int = 0
+    request_num_decode_tokens: int = 0
+    arrival_time: float = 0.0  # Unix timestamp
+    completion_time: float = 0.0  # Unix timestamp
+
+
+@dataclass
 class PrefixCacheStats:
     """Stores prefix cache hit statistics."""
     # Whether reset_prefix_cache was invoked.
