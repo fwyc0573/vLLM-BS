@@ -56,6 +56,16 @@ logger = init_logger(__name__)
 POLLING_TIMEOUT_S = 2.5
 HANDSHAKE_TIMEOUT_MINS = 5
 
+# Frontier comparison: wait for all initial requests before first scheduling
+# Enable via: VLLM_FRONTIER_WAIT_INITIAL_REQUESTS=1
+# Set expected count via: VLLM_FRONTIER_EXPECTED_NUM_REQUESTS=100
+_FRONTIER_WAIT_INITIAL_REQUESTS = (
+    os.environ.get("VLLM_FRONTIER_WAIT_INITIAL_REQUESTS", "0") == "1"
+)
+_FRONTIER_EXPECTED_NUM_REQUESTS = int(
+    os.environ.get("VLLM_FRONTIER_EXPECTED_NUM_REQUESTS", "0")
+)
+
 _R = TypeVar('_R')  # Return type for collective_rpc
 
 
@@ -537,6 +547,15 @@ class EngineCoreProc(EngineCore):
         self.step_fn = (self.step if self.batch_queue is None else
                         self.step_with_batch_queue)
 
+        # Frontier comparison: track if we've done the initial wait
+        self._frontier_initial_wait_done = False
+        if _FRONTIER_WAIT_INITIAL_REQUESTS and _FRONTIER_EXPECTED_NUM_REQUESTS > 0:
+            logger.info(
+                "Frontier comparison mode: will wait for %d requests "
+                "before first scheduling step",
+                _FRONTIER_EXPECTED_NUM_REQUESTS
+            )
+
         # Mark the startup heap as static so that it's ignored by GC.
         # Reduces pause times of oldest generation collections.
         gc.collect()
@@ -739,6 +758,30 @@ class EngineCoreProc(EngineCore):
 
     def _process_input_queue(self):
         """Exits when an engine step needs to be performed."""
+
+        # Frontier comparison: wait for all expected requests before first step
+        if (_FRONTIER_WAIT_INITIAL_REQUESTS
+                and _FRONTIER_EXPECTED_NUM_REQUESTS > 0
+                and not self._frontier_initial_wait_done):
+            # Wait until we have all expected requests
+            while self.scheduler.get_num_unfinished_requests() < _FRONTIER_EXPECTED_NUM_REQUESTS:
+                if self.input_queue.empty():
+                    # Brief sleep to avoid busy-waiting
+                    time.sleep(0.001)
+                    continue
+                req = self.input_queue.get()
+                self._handle_client_request(*req)
+            self._frontier_initial_wait_done = True
+            logger.info(
+                "Frontier comparison: received all %d requests, "
+                "starting scheduling",
+                _FRONTIER_EXPECTED_NUM_REQUESTS
+            )
+            # Process any remaining requests in queue
+            while not self.input_queue.empty():
+                req = self.input_queue.get_nowait()
+                self._handle_client_request(*req)
+            return
 
         waited = False
         while not self.engines_running and not self.scheduler.has_requests() \

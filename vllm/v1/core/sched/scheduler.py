@@ -42,6 +42,7 @@ logger = init_logger(__name__)
 # Enable via environment variable: VLLM_FLOW_VALIDATION=1
 # Log path via: VLLM_FLOW_LOG_PATH (defaults to stdout if not set)
 # ============================================================================
+import json as _frontier_json
 import os as _flow_os
 import logging as _flow_logging
 
@@ -72,6 +73,36 @@ def _log_flow(message: str) -> None:
     """Log a flow validation message if enabled."""
     if _flow_logger is not None:
         _flow_logger.info(message)
+
+
+# ============================================================================
+# Frontier schedule logging (JSONL)
+# Enable via environment variable: VLLM_FRONTIER_SCHED_LOG_PATH=/path/to/file
+# ============================================================================
+_FRONTIER_SCHED_LOG_PATH = _flow_os.environ.get(
+    "VLLM_FRONTIER_SCHED_LOG_PATH", "")
+_frontier_sched_logger: _flow_logging.Logger | None = None
+
+if _FRONTIER_SCHED_LOG_PATH:
+    _frontier_sched_logger = _flow_logging.getLogger("vllm.frontier_sched")
+    _frontier_sched_logger.setLevel(_flow_logging.INFO)
+    _frontier_sched_logger.propagate = False
+
+    _frontier_sched_dir = _flow_os.path.dirname(_FRONTIER_SCHED_LOG_PATH)
+    if _frontier_sched_dir:
+        _flow_os.makedirs(_frontier_sched_dir, exist_ok=True)
+
+    _frontier_handler = _flow_logging.FileHandler(_FRONTIER_SCHED_LOG_PATH)
+    _frontier_handler.setFormatter(_flow_logging.Formatter("%(message)s"))
+    _frontier_sched_logger.addHandler(_frontier_handler)
+    logger.info("Frontier schedule logging ENABLED. Log path: %s",
+                _FRONTIER_SCHED_LOG_PATH)
+
+
+def _log_frontier_schedule(event: dict[str, Any]) -> None:
+    if _frontier_sched_logger is None:
+        return
+    _frontier_sched_logger.info(_frontier_json.dumps(event))
 
 
 class Scheduler(SchedulerInterface):
@@ -209,6 +240,7 @@ class Scheduler(SchedulerInterface):
             dcp_world_size=self.dcp_world_size,
         )
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
+        self._frontier_schedule_step = 0
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
@@ -804,6 +836,22 @@ class Scheduler(SchedulerInterface):
             grammar_bitmask=grammar_bitmask,
         )
 
+        _log_frontier_schedule({
+            "event": "schedule",
+            "step": self._frontier_schedule_step,
+            "timestamp": time.time(),
+            "timestamp_monotonic": scheduled_timestamp,
+            "scheduled_new_req_ids": [req.request_id for req in scheduled_new_reqs],
+            "scheduled_running_req_ids": [req.request_id for req in scheduled_running_reqs],
+            "scheduled_resumed_req_ids": [req.request_id for req in scheduled_resumed_reqs],
+            "preempted_req_ids": [req.request_id for req in preempted_reqs],
+            "num_scheduled_tokens": num_scheduled_tokens,
+            "total_num_scheduled_tokens": total_num_scheduled_tokens,
+            "waiting_queue_size": len(self.waiting),
+            "running_queue_size": len(self.running),
+        })
+        self._frontier_schedule_step += 1
+
         # NOTE(Kuntai): this function is designed for multiple purposes:
         # 1. Plan the KV cache store
         # 2. Wrap up all the KV cache load / save ops into an opaque object
@@ -1235,6 +1283,16 @@ class Scheduler(SchedulerInterface):
         for num_new, output_token_id in enumerate(new_token_ids, 1):
             request.append_output_token_ids(output_token_id)
 
+            # Log first token event for Frontier TTFT calculation
+            if len(request.output_token_ids) == 1:
+                _log_frontier_schedule({
+                    "event": "first_token",
+                    "request_id": request.request_id,
+                    "timestamp": time.time(),
+                    "arrival_time": request.arrival_time,
+                    "num_prompt_tokens": request.num_prompt_tokens,
+                })
+
             # Check for stop and update request state.
             # This must be called before we make the EngineCoreOutput.
             stopped = check_stop(request, self.max_model_len)
@@ -1301,6 +1359,15 @@ class Scheduler(SchedulerInterface):
         self.requests[request.request_id] = request
         if self.log_stats:
             request.record_event(EngineCoreEventType.QUEUED)
+        _log_frontier_schedule({
+            "event": "request_arrival",
+            "request_id": request.request_id,
+            "arrival_time": request.arrival_time,
+            "timestamp": time.time(),
+            "num_prompt_tokens": request.num_prompt_tokens,
+            "max_tokens": request.max_tokens,
+            "priority": request.priority,
+        })
 
     def finish_requests(
         self,
@@ -1348,6 +1415,17 @@ class Scheduler(SchedulerInterface):
 
     def _free_request(self, request: Request) -> Optional[dict[str, Any]]:
         assert request.is_finished()
+
+        # Log request completion for Frontier comparison
+        _log_frontier_schedule({
+            "event": "request_completed",
+            "request_id": request.request_id,
+            "timestamp": time.time(),
+            "arrival_time": request.arrival_time,
+            "num_prompt_tokens": request.num_prompt_tokens,
+            "num_output_tokens": len(request.output_token_ids),
+            "status": request.status.name,
+        })
 
         delay_free_blocks, kv_xfer_params = self._connector_finished(request)
         self.encoder_cache_manager.free(request)

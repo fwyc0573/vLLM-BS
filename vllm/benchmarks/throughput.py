@@ -33,6 +33,25 @@ from vllm.sampling_params import BeamSearchParams
 from vllm.utils import merge_async_iterators
 
 
+def _truncate_frontier_logs_if_requested() -> None:
+    if os.environ.get("VLLM_FRONTIER_TRACE_SKIP_WARMUP", "0") != "1":
+        return
+    sched_path = os.environ.get("VLLM_FRONTIER_SCHED_LOG_PATH", "")
+    batch_path = os.environ.get("VLLM_FRONTIER_BATCH_LOG_PATH", "")
+    if not sched_path and not batch_path:
+        raise RuntimeError(
+            "VLLM_FRONTIER_TRACE_SKIP_WARMUP=1 but no Frontier log paths are set"
+        )
+    for log_path in (sched_path, batch_path):
+        if not log_path:
+            continue
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        with open(log_path, "w", encoding="utf-8"):
+            pass
+
+
 def run_vllm(
     requests: list[SampleRequest],
     n: int,
@@ -42,6 +61,7 @@ def run_vllm(
 ) -> tuple[float, Optional[list[RequestOutput]]]:
     from vllm import LLM, SamplingParams
     llm = LLM(**dataclasses.asdict(engine_args))
+    _truncate_frontier_logs_if_requested()
     assert all(
         llm.llm_engine.model_config.max_model_len >= (
             request.prompt_len + request.expected_output_len)

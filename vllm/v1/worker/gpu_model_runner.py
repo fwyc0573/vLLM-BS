@@ -3,6 +3,7 @@
 
 import gc
 import itertools
+import json
 import os
 import time
 from collections import defaultdict
@@ -14,6 +15,10 @@ from typing import TYPE_CHECKING, Any, Optional, Union, cast
 # Frontier comparison instrumentation flag
 FRONTIER_INSTRUMENTATION_ENABLED = os.environ.get(
     "VLLM_FRONTIER_INSTRUMENTATION", "0") == "1"
+FRONTIER_BATCH_LOG_PATH = os.environ.get("VLLM_FRONTIER_BATCH_LOG_PATH", "")
+FRONTIER_BATCH_LOG_ENABLED = (
+    FRONTIER_INSTRUMENTATION_ENABLED and bool(FRONTIER_BATCH_LOG_PATH)
+)
 
 import numpy as np
 import torch
@@ -416,6 +421,18 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 enable_timing=True)
             self._frontier_batch_metrics: list[dict] = []
             self._frontier_batch_id = 0
+            self._frontier_batch_log_file = None
+            if FRONTIER_BATCH_LOG_ENABLED:
+                log_dir = os.path.dirname(FRONTIER_BATCH_LOG_PATH)
+                if log_dir:
+                    os.makedirs(log_dir, exist_ok=True)
+                try:
+                    self._frontier_batch_log_file = open(
+                        FRONTIER_BATCH_LOG_PATH, "a", encoding="utf-8")
+                except OSError as exc:
+                    raise RuntimeError(
+                        f"Failed to open Frontier batch log file: {FRONTIER_BATCH_LOG_PATH}"
+                    ) from exc
             logger.info("Frontier instrumentation enabled")
 
     def _make_buffer(self,
@@ -2066,8 +2083,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Run the model.
         # Use persistent buffers for CUDA graphs.
-        # Frontier instrumentation: record start event
-        if FRONTIER_INSTRUMENTATION_ENABLED:
+        trace_active = FRONTIER_INSTRUMENTATION_ENABLED
+        if trace_active:
             self._frontier_forward_start_event.record()
 
         with (set_forward_context(
@@ -2089,7 +2106,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             )
 
         # Frontier instrumentation: record end event and collect metrics
-        if FRONTIER_INSTRUMENTATION_ENABLED:
+        if trace_active:
             self._frontier_forward_end_event.record()
             torch.cuda.synchronize()
             forward_time_ms = self._frontier_forward_start_event.elapsed_time(
@@ -2101,6 +2118,40 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 "batch_execution_time": forward_time_ms,
                 "timestamp": time.time(),
             })
+            if FRONTIER_BATCH_LOG_ENABLED:
+                if self._frontier_batch_log_file is None:
+                    raise RuntimeError(
+                        "Frontier batch log file is not initialized")
+                batch_req_ids = list(self.input_batch.req_ids)
+                req_tokens = []
+                # Calculate prefill and decode tokens using scheduler_output
+                num_prefill_tokens = 0
+                num_decode_tokens = 0
+                for req_id in batch_req_ids:
+                    # Get actual scheduled tokens from scheduler_output
+                    scheduled_tokens = scheduler_output.num_scheduled_tokens.get(
+                        req_id, 0)
+                    req_tokens.append(scheduled_tokens)
+                    # Decode: exactly 1 token scheduled for existing request
+                    if scheduled_tokens == 1:
+                        num_decode_tokens += 1
+                    else:
+                        # Prefill (initial or chunked)
+                        num_prefill_tokens += scheduled_tokens
+                log_record = {
+                    "batch_id": self._frontier_batch_id,
+                    "batch_size": self.input_batch.num_reqs,
+                    "batch_num_tokens": int(num_input_tokens),
+                    "batch_num_prefill_tokens": num_prefill_tokens,
+                    "batch_num_decode_tokens": num_decode_tokens,
+                    "batch_execution_time_ms": forward_time_ms,
+                    "timestamp": time.time(),
+                    "request_ids": batch_req_ids,
+                    "request_num_tokens": req_tokens,
+                }
+                self._frontier_batch_log_file.write(
+                    json.dumps(log_record) + "\n")
+                self._frontier_batch_log_file.flush()
             self._frontier_batch_id += 1
 
         with record_function_or_nullcontext("Postprocess"):

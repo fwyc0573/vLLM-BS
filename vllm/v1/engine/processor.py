@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
 import time
 from collections.abc import Mapping
 from typing import Any, Literal, Optional, Union
@@ -27,6 +28,10 @@ from vllm.v1.structured_output.backend_outlines import (
     validate_structured_output_request_outlines)
 from vllm.v1.structured_output.backend_xgrammar import (
     validate_xgrammar_grammar)
+
+_FRONTIER_FORCE_ARRIVAL_TIME_ZERO = (
+    os.environ.get("VLLM_FRONTIER_FORCE_ARRIVAL_TIME_ZERO", "0") == "1"
+)
 
 
 class Processor:
@@ -334,7 +339,9 @@ class Processor:
             raise ValueError(f"data_parallel_rank {data_parallel_rank} "
                              f"is out of range [0, {data_parallel_size}).")
 
-        if arrival_time is None:
+        if _FRONTIER_FORCE_ARRIVAL_TIME_ZERO:
+            arrival_time = 0.0
+        elif arrival_time is None:
             arrival_time = time.time()
 
         # Optionally generate multimodal hash overrides to avoid hashing
