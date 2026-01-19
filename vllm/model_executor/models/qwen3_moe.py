@@ -281,7 +281,7 @@ class Qwen3MoeAttention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        with record_function_or_nullcontext("attn_pre_proj"):
+        if should_record_frontier_op_meta("attn_pre_proj"):
             record_frontier_op_meta(
                 "attn_pre_proj",
                 {
@@ -303,6 +303,7 @@ class Qwen3MoeAttention(nn.Module):
                     "input_is_contiguous": hidden_states.is_contiguous(),
                 },
             )
+        with record_function_or_nullcontext("attn_pre_proj"):
             qkv, _ = self.qkv_proj(hidden_states)
             q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
             # Add qk-norm
@@ -315,20 +316,19 @@ class Qwen3MoeAttention(nn.Module):
                                self.head_dim)
             k_by_head = self.k_norm(k_by_head)
             k = k_by_head.view(k.shape)
-        with record_function_or_nullcontext("attn_rope"):
-            positions_meta: dict[str, Any] = {}
-            if should_record_frontier_op_meta("attn_rope"):
-                positions_meta = get_frontier_positions_meta() or {}
-                required_keys = [
-                    "positions_request_offsets",
-                    "positions_request_num_scheduled",
-                ]
-                missing = [key for key in required_keys if key not in positions_meta]
-                if missing:
-                    raise RuntimeError(
-                        "Missing frontier positions meta fields for attn_rope: "
-                        f"{missing}"
-                    )
+        positions_meta: dict[str, Any] = {}
+        if should_record_frontier_op_meta("attn_rope"):
+            positions_meta = get_frontier_positions_meta() or {}
+            required_keys = [
+                "positions_request_offsets",
+                "positions_request_num_scheduled",
+            ]
+            missing = [key for key in required_keys if key not in positions_meta]
+            if missing:
+                raise RuntimeError(
+                    "Missing frontier positions meta fields for attn_rope: "
+                    f"{missing}"
+                )
             record_frontier_op_meta(
                 "attn_rope",
                 {
@@ -358,9 +358,10 @@ class Qwen3MoeAttention(nn.Module):
                     **positions_meta,
                 },
             )
+        with record_function_or_nullcontext("attn_rope"):
             q, k = self.rotary_emb(positions, q, k)
         attn_output = self.attn(q, k, v)
-        with record_function_or_nullcontext("attn_post_proj"):
+        if should_record_frontier_op_meta("attn_post_proj"):
             record_frontier_op_meta(
                 "attn_post_proj",
                 {
@@ -378,6 +379,7 @@ class Qwen3MoeAttention(nn.Module):
                     "input_is_contiguous": attn_output.is_contiguous(),
                 },
             )
+        with record_function_or_nullcontext("attn_post_proj"):
             output, _ = self.o_proj(attn_output)
         return output
 
@@ -448,11 +450,12 @@ class Qwen3MoeDecoderLayer(nn.Module):
         residual: Optional[torch.Tensor],
     ) -> tuple[torch.Tensor, torch.Tensor]:
         # Self Attention
-        with record_function_or_nullcontext("input_layernorm"):
-            if residual is None:
+        if residual is None:
+            with record_function_or_nullcontext("input_layernorm"):
                 residual = hidden_states
                 hidden_states = self.input_layernorm(hidden_states)
-            else:
+        else:
+            if should_record_frontier_op_meta("input_layernorm"):
                 record_frontier_op_meta(
                     "input_layernorm",
                     {
@@ -471,25 +474,27 @@ class Qwen3MoeDecoderLayer(nn.Module):
                         "residual_is_contiguous": residual.is_contiguous(),
                     },
                 )
+            if should_record_frontier_op_meta("add"):
+                record_frontier_op_meta(
+                    "add",
+                    {
+                        "module": "Qwen3MoeDecoderLayer.layernorm_add",
+                        "backend": "vllm.model_executor.layers.layernorm",
+                        "tensor_parallel_size": get_tensor_model_parallel_world_size(),
+                        "hidden_size": self.hidden_size,
+                        "rms_norm_eps": self.rms_norm_eps,
+                        "input_shape": list(hidden_states.shape),
+                        "input_dtype": str(hidden_states.dtype),
+                        "input_stride": list(hidden_states.stride()),
+                        "input_is_contiguous": hidden_states.is_contiguous(),
+                        "residual_shape": list(residual.shape),
+                        "residual_dtype": str(residual.dtype),
+                        "residual_stride": list(residual.stride()),
+                        "residual_is_contiguous": residual.is_contiguous(),
+                    },
+                )
+            with record_function_or_nullcontext("input_layernorm"):
                 with record_function_or_nullcontext("add"):
-                    record_frontier_op_meta(
-                        "add",
-                        {
-                            "module": "Qwen3MoeDecoderLayer.layernorm_add",
-                            "backend": "vllm.model_executor.layers.layernorm",
-                            "tensor_parallel_size": get_tensor_model_parallel_world_size(),
-                            "hidden_size": self.hidden_size,
-                            "rms_norm_eps": self.rms_norm_eps,
-                            "input_shape": list(hidden_states.shape),
-                            "input_dtype": str(hidden_states.dtype),
-                            "input_stride": list(hidden_states.stride()),
-                            "input_is_contiguous": hidden_states.is_contiguous(),
-                            "residual_shape": list(residual.shape),
-                            "residual_dtype": str(residual.dtype),
-                            "residual_stride": list(residual.stride()),
-                            "residual_is_contiguous": residual.is_contiguous(),
-                        },
-                    )
                     hidden_states, residual = self.input_layernorm(
                         hidden_states, residual)
         hidden_states = self.self_attn(
@@ -498,7 +503,7 @@ class Qwen3MoeDecoderLayer(nn.Module):
         )
 
         # Fully Connected
-        with record_function_or_nullcontext("post_attention_layernorm"):
+        if should_record_frontier_op_meta("post_attention_layernorm"):
             record_frontier_op_meta(
                 "post_attention_layernorm",
                 {
@@ -525,25 +530,27 @@ class Qwen3MoeDecoderLayer(nn.Module):
                     ),
                 },
             )
+        if should_record_frontier_op_meta("add"):
+            record_frontier_op_meta(
+                "add",
+                {
+                    "module": "Qwen3MoeDecoderLayer.layernorm_add",
+                    "backend": "vllm.model_executor.layers.layernorm",
+                    "tensor_parallel_size": get_tensor_model_parallel_world_size(),
+                    "hidden_size": self.hidden_size,
+                    "rms_norm_eps": self.rms_norm_eps,
+                    "input_shape": list(hidden_states.shape),
+                    "input_dtype": str(hidden_states.dtype),
+                    "input_stride": list(hidden_states.stride()),
+                    "input_is_contiguous": hidden_states.is_contiguous(),
+                    "residual_shape": list(residual.shape),
+                    "residual_dtype": str(residual.dtype),
+                    "residual_stride": list(residual.stride()),
+                    "residual_is_contiguous": residual.is_contiguous(),
+                },
+            )
+        with record_function_or_nullcontext("post_attention_layernorm"):
             with record_function_or_nullcontext("add"):
-                record_frontier_op_meta(
-                    "add",
-                    {
-                        "module": "Qwen3MoeDecoderLayer.layernorm_add",
-                        "backend": "vllm.model_executor.layers.layernorm",
-                        "tensor_parallel_size": get_tensor_model_parallel_world_size(),
-                        "hidden_size": self.hidden_size,
-                        "rms_norm_eps": self.rms_norm_eps,
-                            "input_shape": list(hidden_states.shape),
-                            "input_dtype": str(hidden_states.dtype),
-                            "input_stride": list(hidden_states.stride()),
-                            "input_is_contiguous": hidden_states.is_contiguous(),
-                            "residual_shape": list(residual.shape),
-                            "residual_dtype": str(residual.dtype),
-                            "residual_stride": list(residual.stride()),
-                            "residual_is_contiguous": residual.is_contiguous(),
-                        },
-                    )
                 hidden_states, residual = self.post_attention_layernorm(
                     hidden_states, residual)
         hidden_states = self.mlp(hidden_states)
