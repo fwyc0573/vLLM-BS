@@ -33,16 +33,19 @@ from vllm.sampling_params import BeamSearchParams
 from vllm.utils import merge_async_iterators
 
 
-def _truncate_frontier_logs_if_requested() -> None:
+def _truncate_frontier_logs_if_requested(activate: bool = True) -> None:
     if os.environ.get("VLLM_FRONTIER_TRACE_SKIP_WARMUP", "0") != "1":
         return
+    from vllm.v1 import frontier_trace
     sched_path = os.environ.get("VLLM_FRONTIER_SCHED_LOG_PATH", "")
     batch_path = os.environ.get("VLLM_FRONTIER_BATCH_LOG_PATH", "")
-    if not sched_path and not batch_path:
+    cuda_event_path = os.environ.get("VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH", "")
+    moe_routing_path = os.environ.get("VLLM_FRONTIER_MOE_ROUTING_LOG_PATH", "")
+    if not (sched_path or batch_path or cuda_event_path or moe_routing_path):
         raise RuntimeError(
             "VLLM_FRONTIER_TRACE_SKIP_WARMUP=1 but no Frontier log paths are set"
         )
-    for log_path in (sched_path, batch_path):
+    for log_path in (sched_path, batch_path, cuda_event_path, moe_routing_path):
         if not log_path:
             continue
         log_dir = os.path.dirname(log_path)
@@ -50,6 +53,11 @@ def _truncate_frontier_logs_if_requested() -> None:
             os.makedirs(log_dir, exist_ok=True)
         with open(log_path, "w", encoding="utf-8"):
             pass
+    if frontier_trace.should_skip_warmup():
+        if activate:
+            frontier_trace.activate()
+        else:
+            frontier_trace.deactivate()
 
 
 def run_vllm(
@@ -58,10 +66,16 @@ def run_vllm(
     engine_args: EngineArgs,
     do_profile: bool,
     disable_detokenize: bool = False,
+    num_warmup_iters: int = 0,
 ) -> tuple[float, Optional[list[RequestOutput]]]:
     from vllm import LLM, SamplingParams
     llm = LLM(**dataclasses.asdict(engine_args))
-    _truncate_frontier_logs_if_requested()
+    if num_warmup_iters < 0:
+        raise ValueError("num_warmup_iters must be >= 0")
+    if num_warmup_iters > 0:
+        _truncate_frontier_logs_if_requested(activate=False)
+    else:
+        _truncate_frontier_logs_if_requested()
     assert all(
         llm.llm_engine.model_config.max_model_len >= (
             request.prompt_len + request.expected_output_len)
@@ -95,6 +109,15 @@ def run_vllm(
 
     outputs = None
     if not use_beam_search:
+        if num_warmup_iters > 0:
+            for _ in range(num_warmup_iters):
+                llm.generate(
+                    prompts,
+                    sampling_params,
+                    lora_request=lora_requests,
+                    use_tqdm=False,
+                )
+            _truncate_frontier_logs_if_requested()
         start = time.perf_counter()
         if do_profile:
             llm.start_profile()
@@ -473,6 +496,13 @@ def validate_args(args):
     if args.backend == "mii" and args.tokenizer != args.model:
         raise ValueError(
             "Tokenizer must be the same as the model for MII backend.")
+
+    if args.num_warmup_iters < 0:
+        raise ValueError("num_warmup_iters must be >= 0")
+    if args.num_warmup_iters > 0 and args.backend != "vllm":
+        raise ValueError("num_warmup_iters is only supported for vLLM backend")
+    if args.num_warmup_iters > 0 and getattr(args, "async_engine", False):
+        raise ValueError("num_warmup_iters is not supported with async engine")
     
     # --data-parallel is not supported currently.
     # https://github.com/vllm-project/vllm/issues/16222
@@ -548,6 +578,12 @@ def add_cli_args(parser: argparse.ArgumentParser):
         action="store_true",
         help=("Do not detokenize the response (i.e. do not include "
               "detokenization time in the measurement)"))
+    parser.add_argument(
+        "--num-warmup-iters",
+        type=int,
+        default=0,
+        help="Number of warmup iterations to run before timing (vLLM backend only).",
+    )
     # LoRA
     parser.add_argument(
         "--lora-path",
@@ -653,7 +689,8 @@ def main(args: argparse.Namespace):
             elapsed_time, request_outputs = run_vllm(
                 requests, args.n, EngineArgs.from_cli_args(args),
                 disable_detokenize=args.disable_detokenize,
-                do_profile=args.profile)
+                do_profile=args.profile,
+                num_warmup_iters=args.num_warmup_iters)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         if args.profile:

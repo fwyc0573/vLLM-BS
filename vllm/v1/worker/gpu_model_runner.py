@@ -8,9 +8,11 @@ import os
 import time
 from collections import defaultdict
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, Union, cast
+
+import vllm.envs as envs
 
 # Frontier comparison instrumentation flag
 FRONTIER_INSTRUMENTATION_ENABLED = os.environ.get(
@@ -19,6 +21,22 @@ FRONTIER_BATCH_LOG_PATH = os.environ.get("VLLM_FRONTIER_BATCH_LOG_PATH", "")
 FRONTIER_BATCH_LOG_ENABLED = (
     FRONTIER_INSTRUMENTATION_ENABLED and bool(FRONTIER_BATCH_LOG_PATH)
 )
+FRONTIER_CUDA_EVENT_OP_LOG_PATH = os.environ.get(
+    "VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH", "")
+FRONTIER_CUDA_EVENT_OP_SCOPES = os.environ.get(
+    "VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES", "")
+FRONTIER_CUDA_EVENT_OP_LOG_ENABLED = (
+    FRONTIER_INSTRUMENTATION_ENABLED
+    and bool(FRONTIER_CUDA_EVENT_OP_LOG_PATH)
+)
+FRONTIER_RUNTIME_META_ENABLED = (
+    FRONTIER_CUDA_EVENT_OP_LOG_ENABLED and envs.VLLM_FRONTIER_RUNTIME_META_ENABLED
+)
+FRONTIER_MOE_ROUTING_LOG_PATH = os.environ.get(
+    "VLLM_FRONTIER_MOE_ROUTING_LOG_PATH", "")
+FRONTIER_MOE_ROUTING_LOG_ENABLED = (
+    FRONTIER_INSTRUMENTATION_ENABLED and bool(FRONTIER_MOE_ROUTING_LOG_PATH)
+)
 
 import numpy as np
 import torch
@@ -26,7 +44,7 @@ import torch.distributed
 import torch.nn as nn
 from tqdm import tqdm
 
-import vllm.envs as envs
+from vllm.v1 import frontier_trace
 from vllm.attention import Attention, AttentionType
 from vllm.attention.backends.abstract import AttentionBackend
 from vllm.attention.layers.chunked_local_attention import ChunkedLocalAttention
@@ -93,7 +111,10 @@ from vllm.v1.spec_decode.eagle import EagleProposer
 from vllm.v1.spec_decode.medusa import MedusaProposer
 from vllm.v1.spec_decode.metadata import SpecDecodeMetadata
 from vllm.v1.spec_decode.ngram_proposer import NgramProposer
-from vllm.v1.utils import CpuGpuBuffer, record_function_or_nullcontext
+from vllm.v1.utils import (CpuGpuBuffer, FrontierCudaEventOpLogger,
+                           FrontierMoeRoutingLogger,
+                           record_function_or_nullcontext,
+                           set_frontier_positions_meta)
 from vllm.v1.worker.gpu_input_batch import CachedRequestState, InputBatch
 from vllm.v1.worker.kv_connector_model_runner_mixin import (
     KVConnectorModelRunnerMixin, KVConnectorOutput)
@@ -414,6 +435,26 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             pin_memory=self.pin_memory)
 
         # Frontier comparison instrumentation
+        if (FRONTIER_CUDA_EVENT_OP_LOG_PATH
+                and not FRONTIER_INSTRUMENTATION_ENABLED):
+            raise RuntimeError(
+                "VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH requires "
+                "VLLM_FRONTIER_INSTRUMENTATION=1")
+        if envs.VLLM_FRONTIER_RUNTIME_META_ENABLED and not FRONTIER_CUDA_EVENT_OP_LOG_ENABLED:
+            raise RuntimeError(
+                "VLLM_FRONTIER_RUNTIME_META_ENABLED requires "
+                "VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH")
+        if FRONTIER_CUDA_EVENT_OP_LOG_ENABLED and not self.model_config.enforce_eager:
+            raise RuntimeError(
+                "Frontier CUDA event per-op logging requires --enforce-eager.")
+        if (FRONTIER_MOE_ROUTING_LOG_PATH
+                and not FRONTIER_INSTRUMENTATION_ENABLED):
+            raise RuntimeError(
+                "VLLM_FRONTIER_MOE_ROUTING_LOG_PATH requires "
+                "VLLM_FRONTIER_INSTRUMENTATION=1")
+        if FRONTIER_MOE_ROUTING_LOG_ENABLED and not self.model_config.enforce_eager:
+            raise RuntimeError(
+                "Frontier MoE routing logging requires --enforce-eager.")
         if FRONTIER_INSTRUMENTATION_ENABLED:
             self._frontier_forward_start_event = torch.cuda.Event(
                 enable_timing=True)
@@ -422,6 +463,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self._frontier_batch_metrics: list[dict] = []
             self._frontier_batch_id = 0
             self._frontier_batch_log_file = None
+            self._frontier_cuda_event_op_logger: Optional[
+                FrontierCudaEventOpLogger] = None
+            self._frontier_moe_routing_logger: Optional[
+                FrontierMoeRoutingLogger] = None
             if FRONTIER_BATCH_LOG_ENABLED:
                 log_dir = os.path.dirname(FRONTIER_BATCH_LOG_PATH)
                 if log_dir:
@@ -433,6 +478,27 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     raise RuntimeError(
                         f"Failed to open Frontier batch log file: {FRONTIER_BATCH_LOG_PATH}"
                     ) from exc
+            if FRONTIER_CUDA_EVENT_OP_LOG_ENABLED:
+                scopes = None
+                if FRONTIER_CUDA_EVENT_OP_SCOPES:
+                    scopes = [
+                        item.strip()
+                        for item in FRONTIER_CUDA_EVENT_OP_SCOPES.split(",")
+                        if item.strip()
+                    ]
+                    if not scopes:
+                        raise RuntimeError(
+                            "VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES is empty.")
+                self._frontier_cuda_event_op_logger = FrontierCudaEventOpLogger(
+                    FRONTIER_CUDA_EVENT_OP_LOG_PATH,
+                    scopes=scopes,
+                    meta_enabled=FRONTIER_RUNTIME_META_ENABLED,
+                )
+                logger.info("Frontier CUDA event per-op logging enabled")
+            if FRONTIER_MOE_ROUTING_LOG_ENABLED:
+                self._frontier_moe_routing_logger = FrontierMoeRoutingLogger(
+                    FRONTIER_MOE_ROUTING_LOG_PATH)
+                logger.info("Frontier MoE routing logging enabled")
             logger.info("Frontier instrumentation enabled")
 
     def _make_buffer(self,
@@ -932,6 +998,17 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         np.add(self.input_batch.num_computed_tokens_cpu[req_indices],
                arange,
                out=positions_np)
+        if FRONTIER_RUNTIME_META_ENABLED and not self.uses_mrope:
+            set_frontier_positions_meta({
+                "positions_request_offsets": (
+                    self.input_batch.num_computed_tokens_cpu[:num_reqs]
+                    .astype(np.int64)
+                    .tolist()
+                ),
+                "positions_request_num_scheduled": (
+                    num_scheduled_tokens.astype(np.int64).tolist()
+                ),
+            })
 
         # Calculate M-RoPE positions.
         # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
@@ -2083,10 +2160,59 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Run the model.
         # Use persistent buffers for CUDA graphs.
-        trace_active = FRONTIER_INSTRUMENTATION_ENABLED
+        trace_active = (FRONTIER_INSTRUMENTATION_ENABLED
+                        and frontier_trace.is_active())
+        frontier_op_logger = None
+        frontier_moe_logger = None
+        frontier_batch_req_ids = None
+        frontier_req_tokens = None
+        frontier_num_prefill_tokens = 0
+        frontier_num_decode_tokens = 0
         if trace_active:
+            frontier_op_logger = self._frontier_cuda_event_op_logger
+            frontier_moe_logger = self._frontier_moe_routing_logger
+            if FRONTIER_BATCH_LOG_ENABLED or frontier_op_logger is not None:
+                batch_req_ids = list(self.input_batch.req_ids)
+                req_tokens = []
+                num_prefill_tokens = 0
+                num_decode_tokens = 0
+                for req_id in batch_req_ids:
+                    scheduled_tokens = scheduler_output.num_scheduled_tokens.get(
+                        req_id, 0)
+                    req_tokens.append(scheduled_tokens)
+                    if scheduled_tokens == 1:
+                        num_decode_tokens += 1
+                    else:
+                        num_prefill_tokens += scheduled_tokens
+                frontier_batch_req_ids = batch_req_ids
+                frontier_req_tokens = req_tokens
+                frontier_num_prefill_tokens = num_prefill_tokens
+                frontier_num_decode_tokens = num_decode_tokens
+            if frontier_op_logger is not None:
+                frontier_op_logger.start_batch(
+                    batch_id=self._frontier_batch_id,
+                    batch_size=self.input_batch.num_reqs,
+                    batch_num_tokens=int(num_input_tokens),
+                    batch_num_prefill_tokens=frontier_num_prefill_tokens,
+                    batch_num_decode_tokens=frontier_num_decode_tokens,
+                    batch_request_num_tokens=frontier_req_tokens,
+                )
+            if frontier_moe_logger is not None:
+                frontier_moe_logger.start_batch(
+                    batch_id=self._frontier_batch_id,
+                    batch_size=self.input_batch.num_reqs,
+                    batch_num_tokens=int(num_input_tokens),
+                    batch_num_prefill_tokens=frontier_num_prefill_tokens,
+                    batch_num_decode_tokens=frontier_num_decode_tokens,
+                )
             self._frontier_forward_start_event.record()
 
+        op_logger_context = (frontier_op_logger.activate()
+                             if frontier_op_logger is not None else
+                             nullcontext())
+        moe_logger_context = (frontier_moe_logger.activate()
+                              if frontier_moe_logger is not None else
+                              nullcontext())
         with (set_forward_context(
                 attn_metadata,
                 self.vllm_config,
@@ -2094,7 +2220,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 num_tokens_across_dp=num_tokens_across_dp,
                 cudagraph_runtime_mode=cudagraph_runtime_mode,
                 batch_descriptor=batch_descriptor,
-        ), record_function_or_nullcontext("Forward"),
+        ), record_function_or_nullcontext("Forward"), op_logger_context,
+              moe_logger_context,
               self.maybe_get_kv_connector_output(scheduler_output) as
               kv_connector_output):
             model_output = self.model(
@@ -2108,7 +2235,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # Frontier instrumentation: record end event and collect metrics
         if trace_active:
             self._frontier_forward_end_event.record()
-            torch.cuda.synchronize()
+            if frontier_op_logger is not None:
+                frontier_op_logger.finish_batch()
+            if frontier_moe_logger is not None:
+                frontier_moe_logger.finish_batch()
+            # Always synchronize before calculating elapsed time
+            if frontier_op_logger is None:
+                torch.cuda.synchronize()
             forward_time_ms = self._frontier_forward_start_event.elapsed_time(
                 self._frontier_forward_end_event)
             self._frontier_batch_metrics.append({
@@ -2122,32 +2255,19 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 if self._frontier_batch_log_file is None:
                     raise RuntimeError(
                         "Frontier batch log file is not initialized")
-                batch_req_ids = list(self.input_batch.req_ids)
-                req_tokens = []
-                # Calculate prefill and decode tokens using scheduler_output
-                num_prefill_tokens = 0
-                num_decode_tokens = 0
-                for req_id in batch_req_ids:
-                    # Get actual scheduled tokens from scheduler_output
-                    scheduled_tokens = scheduler_output.num_scheduled_tokens.get(
-                        req_id, 0)
-                    req_tokens.append(scheduled_tokens)
-                    # Decode: exactly 1 token scheduled for existing request
-                    if scheduled_tokens == 1:
-                        num_decode_tokens += 1
-                    else:
-                        # Prefill (initial or chunked)
-                        num_prefill_tokens += scheduled_tokens
+                if frontier_batch_req_ids is None or frontier_req_tokens is None:
+                    raise RuntimeError(
+                        "Frontier batch metadata missing for logging.")
                 log_record = {
                     "batch_id": self._frontier_batch_id,
                     "batch_size": self.input_batch.num_reqs,
                     "batch_num_tokens": int(num_input_tokens),
-                    "batch_num_prefill_tokens": num_prefill_tokens,
-                    "batch_num_decode_tokens": num_decode_tokens,
+                    "batch_num_prefill_tokens": frontier_num_prefill_tokens,
+                    "batch_num_decode_tokens": frontier_num_decode_tokens,
                     "batch_execution_time_ms": forward_time_ms,
                     "timestamp": time.time(),
-                    "request_ids": batch_req_ids,
-                    "request_num_tokens": req_tokens,
+                    "request_ids": frontier_batch_req_ids,
+                    "request_num_tokens": frontier_req_tokens,
                 }
                 self._frontier_batch_log_file.write(
                     json.dumps(log_record) + "\n")
@@ -3326,6 +3446,23 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         # Calculate reorder batch threshold (if needed)
         self.calculate_reorder_batch_threshold()
+        if FRONTIER_INSTRUMENTATION_ENABLED:
+            backend_names = {
+                attn_group.backend.get_name()
+                for attn_group in self._attn_group_iterator()
+            }
+            if not backend_names:
+                raise RuntimeError(
+                    "Frontier instrumentation requires initialized attention backends."
+                )
+            non_flashinfer = sorted(
+                name for name in backend_names if "FLASHINFER" not in name)
+            if non_flashinfer:
+                raise RuntimeError(
+                    "Frontier instrumentation requires FlashInfer attention backend. "
+                    f"Detected: {', '.join(sorted(backend_names))}. "
+                    "Set VLLM_ATTENTION_BACKEND=FLASHINFER or FLASHINFER_VLLM_V1."
+                )
 
     def initialize_cudagraph_capture(self) -> None:
         min_cg_support = AttentionCGSupport.ALWAYS

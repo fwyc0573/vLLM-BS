@@ -2,10 +2,15 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import argparse
 import contextlib
+import contextvars
+from dataclasses import dataclass
+import math
+import json
 import multiprocessing
+import os
 import time
 import weakref
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager
 from multiprocessing import connection
 from multiprocessing.process import BaseProcess
@@ -17,6 +22,7 @@ from torch.autograd.profiler import record_function
 
 import vllm.envs as envs
 from vllm.logger import init_logger
+from vllm.v1 import frontier_trace
 from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import (get_open_port, get_open_zmq_ipc_path, get_tcp_uri,
@@ -33,6 +39,459 @@ logger = init_logger(__name__)
 
 T = TypeVar("T")
 
+DEFAULT_FRONTIER_CUDA_EVENT_OP_SCOPES = [
+    "input_layernorm",
+    "attn_pre_proj",
+    "attn_rope",
+    "attn_kv_cache_save",
+    "attn_prefill",
+    "attn_decode",
+    "attn_post_proj",
+    "post_attention_layernorm",
+    "moe_gating",
+    "moe_shuffling",
+    "moe_grouped_gemm",
+    "expert_parallel_alltoall_dispatch",
+    "expert_parallel_alltoall_combine",
+    "expert_parallel_allreduce",
+    "moe_tensor_parallel_allreduce",
+    "tensor_parallel_allreduce",
+    "kv_p2p_send",
+    "kv_p2p_recv",
+    "add",
+]
+
+_FRONTIER_CUDA_EVENT_OP_LOGGER: contextvars.ContextVar[
+    Optional["FrontierCudaEventOpLogger"]
+] = contextvars.ContextVar("frontier_cuda_event_op_logger", default=None)
+_FRONTIER_MOE_ROUTING_LOGGER: contextvars.ContextVar[
+    Optional["FrontierMoeRoutingLogger"]
+] = contextvars.ContextVar("frontier_moe_routing_logger", default=None)
+_FRONTIER_MOE_ROUTING_CONTEXT: contextvars.ContextVar[
+    Optional["FrontierMoeRoutingContext"]
+] = contextvars.ContextVar("frontier_moe_routing_context", default=None)
+_FRONTIER_RUNTIME_POSITIONS_META: contextvars.ContextVar[
+    Optional[dict[str, Any]]
+] = contextvars.ContextVar("frontier_runtime_positions_meta", default=None)
+
+
+class FrontierCudaEventOpLogger:
+    """Collect per-op CUDA event timing for Frontier comparison."""
+
+    def __init__(self,
+                 log_path: str,
+                 scopes: Optional[Sequence[str]] = None,
+                 meta_enabled: bool = False) -> None:
+        if not log_path:
+            raise ValueError("Frontier CUDA event log path is required.")
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        try:
+            self._log_file = open(log_path, "a", encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(
+                f"Failed to open Frontier CUDA event log file: {log_path}"
+            ) from exc
+        self._scopes = set(scopes or DEFAULT_FRONTIER_CUDA_EVENT_OP_SCOPES)
+        if not self._scopes:
+            raise ValueError("Frontier CUDA event scope list is empty.")
+        self._pending_events: list[tuple[str, torch.cuda.Event,
+                                         torch.cuda.Event]] = []
+        self._pending_meta: dict[str, dict[str, Any]] = {}
+        self._meta_enabled = meta_enabled
+        self._batch_active = False
+        self._batch_meta: dict[str, Any] = {}
+
+    @contextlib.contextmanager
+    def activate(self) -> Iterator[None]:
+        token = _FRONTIER_CUDA_EVENT_OP_LOGGER.set(self)
+        try:
+            yield
+        finally:
+            _FRONTIER_CUDA_EVENT_OP_LOGGER.reset(token)
+
+    def should_record(self, op_name: str) -> bool:
+        return op_name in self._scopes
+
+    def start_batch(
+        self,
+        batch_id: int,
+        batch_size: int,
+        batch_num_tokens: int,
+        batch_num_prefill_tokens: int,
+        batch_num_decode_tokens: int,
+        batch_request_num_tokens: Optional[list[int]] = None,
+    ) -> None:
+        if self._batch_active:
+            raise RuntimeError("Frontier CUDA event batch already active.")
+        self._batch_active = True
+        self._batch_meta = {
+            "batch_id": batch_id,
+            "batch_size": batch_size,
+            "batch_num_tokens": batch_num_tokens,
+            "batch_num_prefill_tokens": batch_num_prefill_tokens,
+            "batch_num_decode_tokens": batch_num_decode_tokens,
+        }
+        if batch_request_num_tokens is not None:
+            self._batch_meta["batch_request_num_tokens"] = batch_request_num_tokens
+        self._pending_events = []
+        self._pending_meta = {}
+
+    @contextlib.contextmanager
+    def scope(self, op_name: str) -> Iterator[None]:
+        if not self._batch_active:
+            raise RuntimeError(
+                "Frontier CUDA event logger used before start_batch().")
+        if op_name not in self._scopes:
+            yield
+            return
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
+        try:
+            yield
+        finally:
+            end_event.record()
+            self._pending_events.append((op_name, start_event, end_event))
+
+    def record_meta(self, op_name: str, meta: dict[str, Any]) -> None:
+        if not self._meta_enabled:
+            return
+        if not self._batch_active:
+            raise RuntimeError(
+                "Frontier CUDA event logger meta recorded before start_batch()."
+            )
+        if op_name not in self._scopes:
+            return
+        existing = self._pending_meta.get(op_name)
+        if existing is None:
+            self._pending_meta[op_name] = meta
+            return
+        if existing != meta:
+            raise RuntimeError(
+                f"Inconsistent meta for op {op_name}: {existing} vs {meta}"
+            )
+
+    def finish_batch(self) -> None:
+        if not self._batch_active:
+            raise RuntimeError(
+                "Frontier CUDA event logger finish_batch without start_batch.")
+        if not self._pending_events:
+            raise RuntimeError(
+                "Frontier CUDA event logger captured no operations.")
+        torch.cuda.synchronize()
+        aggregated: dict[str, dict[str, float]] = {}
+        for op_name, start_event, end_event in self._pending_events:
+            duration_ms = start_event.elapsed_time(end_event)
+            if duration_ms <= 0:
+                raise RuntimeError(
+                    f"Non-positive CUDA time for op {op_name}: {duration_ms}")
+            stats = aggregated.setdefault(op_name, {
+                "cuda_time_ms": 0.0,
+                "count": 0.0
+            })
+            stats["cuda_time_ms"] += float(duration_ms)
+            stats["count"] += 1.0
+        timestamp = time.time()
+        for op_name, stats in aggregated.items():
+            meta = self._pending_meta.get(op_name)
+            if self._meta_enabled and meta is None:
+                raise RuntimeError(
+                    f"Missing runtime meta for op {op_name} in batch.")
+            record = {
+                **self._batch_meta,
+                "op_name": op_name,
+                "cuda_time_ms": stats["cuda_time_ms"],
+                "count": int(stats["count"]),
+                "timestamp": timestamp,
+            }
+            if meta is not None:
+                record["meta"] = meta
+            self._log_file.write(json.dumps(record) + "\n")
+        self._log_file.flush()
+        self._batch_active = False
+        self._pending_events = []
+        self._pending_meta = {}
+
+
+class FrontierMoeRoutingLogger:
+    """Collect per-expert token distribution for Frontier MoE routing analysis."""
+
+    def __init__(self, log_path: str) -> None:
+        if not log_path:
+            raise ValueError("Frontier MoE routing log path is required.")
+        log_dir = os.path.dirname(log_path)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
+        try:
+            self._log_file = open(log_path, "a", encoding="utf-8")
+        except OSError as exc:
+            raise RuntimeError(
+                f"Failed to open Frontier MoE routing log file: {log_path}"
+            ) from exc
+        self._batch_active = False
+        self._batch_meta: dict[str, int] = {}
+
+    @contextlib.contextmanager
+    def activate(self) -> Iterator[None]:
+        token = _FRONTIER_MOE_ROUTING_LOGGER.set(self)
+        try:
+            yield
+        finally:
+            _FRONTIER_MOE_ROUTING_LOGGER.reset(token)
+
+    def start_batch(
+        self,
+        batch_id: int,
+        batch_size: int,
+        batch_num_tokens: int,
+        batch_num_prefill_tokens: int,
+        batch_num_decode_tokens: int,
+    ) -> None:
+        if self._batch_active:
+            raise RuntimeError("Frontier MoE routing batch already active.")
+        self._batch_active = True
+        self._batch_meta = {
+            "batch_id": batch_id,
+            "batch_size": batch_size,
+            "batch_num_tokens": batch_num_tokens,
+            "batch_num_prefill_tokens": batch_num_prefill_tokens,
+            "batch_num_decode_tokens": batch_num_decode_tokens,
+        }
+
+    def finish_batch(self) -> None:
+        if not self._batch_active:
+            raise RuntimeError(
+                "Frontier MoE routing logger finish_batch without start_batch."
+            )
+        self._batch_active = False
+        self._batch_meta = {}
+        self._log_file.flush()
+
+    def log_routing(
+        self,
+        layer_name: str,
+        topk_ids: torch.Tensor,
+        num_tokens: int,
+        router_topk: int,
+        global_num_experts: int,
+        local_num_experts: int,
+        ep_rank: int,
+        ep_size: int,
+        expert_map: Optional[torch.Tensor],
+    ) -> None:
+        if not self._batch_active:
+            raise RuntimeError(
+                "Frontier MoE routing logger used before start_batch()."
+            )
+        if num_tokens <= 0:
+            raise RuntimeError(
+                f"Invalid num_tokens for MoE routing: {num_tokens}"
+            )
+        if router_topk <= 0:
+            raise RuntimeError(
+                f"Invalid router_topk for MoE routing: {router_topk}"
+            )
+        if global_num_experts <= 0:
+            raise RuntimeError(
+                f"Invalid global_num_experts for MoE routing: {global_num_experts}"
+            )
+
+        topk_ids_cpu = topk_ids.detach().to("cpu")
+        flat_ids = topk_ids_cpu.reshape(-1).to(torch.int64)
+        if flat_ids.numel() == 0:
+            raise RuntimeError("MoE routing topk_ids is empty.")
+        min_id = int(flat_ids.min().item())
+        max_id = int(flat_ids.max().item())
+        if min_id < 0 or max_id >= global_num_experts:
+            raise RuntimeError(
+                f"MoE routing expert id out of range: min={min_id}, max={max_id}, "
+                f"global_num_experts={global_num_experts}"
+            )
+
+        expected_total_routed = num_tokens * router_topk
+        num_experts_per_device = local_num_experts or global_num_experts
+        if num_experts_per_device <= 0:
+            raise RuntimeError(
+                f"Invalid num_experts_per_device: {num_experts_per_device}"
+            )
+
+        if expert_map is None:
+            counts_tensor = torch.bincount(
+                flat_ids, minlength=global_num_experts
+            )
+            total_routed_tokens = int(counts_tensor.sum().item())
+            if total_routed_tokens != expected_total_routed:
+                raise RuntimeError(
+                    f"MoE routing token mismatch: total_routed_tokens={total_routed_tokens}, "
+                    f"expected={expected_total_routed}"
+                )
+            counts = counts_tensor.tolist()
+        else:
+            expert_map_cpu = expert_map.detach().to("cpu").to(torch.int64)
+            if expert_map_cpu.numel() < global_num_experts:
+                raise RuntimeError(
+                    "MoE routing expert_map length does not cover all experts."
+                )
+            local_ids = expert_map_cpu[flat_ids]
+            local_ids = local_ids[local_ids >= 0]
+            counts_tensor = torch.bincount(
+                local_ids, minlength=num_experts_per_device
+            )
+            total_routed_tokens = int(counts_tensor.sum().item())
+            counts = counts_tensor.tolist()
+
+        if len(counts) != num_experts_per_device:
+            raise RuntimeError(
+                f"MoE routing counts length mismatch: "
+                f"{len(counts)} vs {num_experts_per_device}"
+            )
+        if total_routed_tokens <= 0:
+            raise RuntimeError(
+                f"MoE routing total_routed_tokens invalid: {total_routed_tokens}"
+            )
+
+        mean = total_routed_tokens / num_experts_per_device
+        variance = sum((c - mean) ** 2 for c in counts) / num_experts_per_device
+        std = math.sqrt(variance)
+        load_imbalance_cv = std / mean if mean > 0 else 0.0
+        min_load_ratio = min(counts) / mean if mean > 0 else 0.0
+        max_load_ratio = max(counts) / mean if mean > 0 else 0.0
+        expert_utilization = sum(1 for c in counts if c > 0) / num_experts_per_device
+        probs = [c / total_routed_tokens for c in counts if c > 0]
+        load_entropy = -sum(p * math.log2(p) for p in probs) if probs else 0.0
+        sorted_counts = sorted(counts)
+        gini = (
+            (2 * sum((i + 1) * x for i, x in enumerate(sorted_counts)))
+            / (num_experts_per_device * total_routed_tokens)
+            - (num_experts_per_device + 1) / num_experts_per_device
+        )
+
+        record = {
+            **self._batch_meta,
+            "layer_name": layer_name,
+            "num_tokens": num_tokens,
+            "router_topk": router_topk,
+            "global_num_experts": global_num_experts,
+            "num_experts_per_device": num_experts_per_device,
+            "ep_rank": ep_rank,
+            "ep_size": ep_size,
+            "total_routed_tokens": total_routed_tokens,
+            "expected_total_routed_tokens": expected_total_routed,
+            "tokens_per_expert_avg": mean,
+            "tokens_to_experts_ratio": mean,
+            "expert_utilization": expert_utilization,
+            "min_load_ratio": min_load_ratio,
+            "load_imbalance_cv": load_imbalance_cv,
+            "max_load_ratio": max_load_ratio,
+            "load_entropy": load_entropy,
+            "load_gini_coefficient": gini,
+            "load_distribution": "runtime",
+            "per_expert_tokens": {
+                str(i): int(c) for i, c in enumerate(counts) if c > 0
+            },
+            "timestamp": time.time(),
+        }
+        self._log_file.write(json.dumps(record) + "\n")
+        self._log_file.flush()
+
+
+@dataclass(frozen=True)
+class FrontierMoeRoutingContext:
+    layer_name: str
+    num_tokens: int
+    router_topk: int
+    global_num_experts: int
+    local_num_experts: int
+    ep_rank: int
+    ep_size: int
+    expert_map: Optional[torch.Tensor]
+
+
+@contextlib.contextmanager
+def frontier_moe_routing_context(
+    *,
+    layer_name: str,
+    num_tokens: int,
+    router_topk: int,
+    global_num_experts: int,
+    local_num_experts: int,
+    ep_rank: int,
+    ep_size: int,
+    expert_map: Optional[torch.Tensor],
+) -> Iterator[None]:
+    logger = _FRONTIER_MOE_ROUTING_LOGGER.get()
+    if logger is None:
+        yield
+        return
+
+    if not layer_name:
+        raise RuntimeError("Frontier MoE routing layer_name is required.")
+    if num_tokens <= 0:
+        raise RuntimeError(
+            f"Invalid num_tokens for MoE routing context: {num_tokens}"
+        )
+    if router_topk <= 0:
+        raise RuntimeError(
+            f"Invalid router_topk for MoE routing context: {router_topk}"
+        )
+    if global_num_experts <= 0:
+        raise RuntimeError(
+            f"Invalid global_num_experts for MoE routing context: {global_num_experts}"
+        )
+    if local_num_experts <= 0:
+        raise RuntimeError(
+            f"Invalid local_num_experts for MoE routing context: {local_num_experts}"
+        )
+    if ep_size <= 0:
+        raise RuntimeError(
+            f"Invalid ep_size for MoE routing context: {ep_size}"
+        )
+    if ep_rank < 0 or ep_rank >= ep_size:
+        raise RuntimeError(
+            f"Invalid ep_rank for MoE routing context: {ep_rank}"
+        )
+
+    context = FrontierMoeRoutingContext(
+        layer_name=layer_name,
+        num_tokens=int(num_tokens),
+        router_topk=router_topk,
+        global_num_experts=global_num_experts,
+        local_num_experts=local_num_experts,
+        ep_rank=ep_rank,
+        ep_size=ep_size,
+        expert_map=expert_map,
+    )
+    token = _FRONTIER_MOE_ROUTING_CONTEXT.set(context)
+    try:
+        yield
+    finally:
+        _FRONTIER_MOE_ROUTING_CONTEXT.reset(token)
+
+
+def log_frontier_moe_routing_from_context(
+    topk_ids: torch.Tensor,
+) -> None:
+    logger = _FRONTIER_MOE_ROUTING_LOGGER.get()
+    if logger is None:
+        return
+    context = _FRONTIER_MOE_ROUTING_CONTEXT.get()
+    if context is None:
+        raise RuntimeError(
+            "Frontier MoE routing context missing for active logger."
+        )
+    logger.log_routing(
+        layer_name=context.layer_name,
+        topk_ids=topk_ids,
+        num_tokens=context.num_tokens,
+        router_topk=context.router_topk,
+        global_num_experts=context.global_num_experts,
+        local_num_experts=context.local_num_experts,
+        ep_rank=context.ep_rank,
+        ep_size=context.ep_size,
+        expert_map=context.expert_map,
+    )
 
 class ConstantList(Generic[T], Sequence):
 
@@ -376,7 +835,77 @@ def report_usage_stats(
 
 
 def record_function_or_nullcontext(name: str) -> AbstractContextManager:
+    profiler_ctx: AbstractContextManager
     if envs.VLLM_CUSTOM_SCOPES_FOR_PROFILING:
-        return record_function(name)
+        profiler_ctx = record_function(name)
     else:
-        return contextlib.nullcontext()
+        profiler_ctx = contextlib.nullcontext()
+
+    op_logger = _FRONTIER_CUDA_EVENT_OP_LOGGER.get()
+    if (op_logger is None or not op_logger.should_record(name)
+            or not frontier_trace.is_active()):
+        return profiler_ctx
+
+    @contextlib.contextmanager
+    def _combined_context() -> Iterator[None]:
+        with profiler_ctx:
+            with op_logger.scope(name):
+                yield
+
+    return _combined_context()
+
+
+def record_frontier_op_meta(op_name: str, meta: dict[str, Any]) -> None:
+    if not frontier_trace.is_active():
+        return
+    op_logger = _FRONTIER_CUDA_EVENT_OP_LOGGER.get()
+    if op_logger is None or not op_logger.should_record(op_name):
+        return
+    op_logger.record_meta(op_name, meta)
+
+
+def should_record_frontier_op_meta(op_name: str) -> bool:
+    if not frontier_trace.is_active():
+        return False
+    op_logger = _FRONTIER_CUDA_EVENT_OP_LOGGER.get()
+    return op_logger is not None and op_logger.should_record(op_name)
+
+
+def set_frontier_positions_meta(meta: dict[str, Any]) -> None:
+    if not frontier_trace.is_active():
+        return
+    _FRONTIER_RUNTIME_POSITIONS_META.set(meta)
+
+
+def get_frontier_positions_meta() -> Optional[dict[str, Any]]:
+    return _FRONTIER_RUNTIME_POSITIONS_META.get()
+
+
+def log_frontier_moe_routing(
+    *,
+    layer_name: str,
+    topk_ids: torch.Tensor,
+    num_tokens: int,
+    router_topk: int,
+    global_num_experts: int,
+    local_num_experts: int,
+    ep_rank: int,
+    ep_size: int,
+    expert_map: Optional[torch.Tensor],
+) -> None:
+    if not frontier_trace.is_active():
+        return
+    logger = _FRONTIER_MOE_ROUTING_LOGGER.get()
+    if logger is None:
+        return
+    logger.log_routing(
+        layer_name=layer_name,
+        topk_ids=topk_ids,
+        num_tokens=num_tokens,
+        router_topk=router_topk,
+        global_num_experts=global_num_experts,
+        local_num_experts=local_num_experts,
+        ep_rank=ep_rank,
+        ep_size=ep_size,
+        expert_map=expert_map,
+    )

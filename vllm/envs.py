@@ -180,6 +180,9 @@ if TYPE_CHECKING:
     VLLM_GPT_OSS_USE_CONTAINER_TOOL: bool = False
     VLLM_GPT_OSS_HARMONY_SYSTEM_INSTRUCTIONS: bool = False
     VLLM_CUSTOM_SCOPES_FOR_PROFILING: bool = False
+    VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH: Optional[str] = None
+    VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES: str = ""
+    VLLM_FRONTIER_RUNTIME_META_ENABLED: bool = False
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
 
 
@@ -1253,6 +1256,14 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Add optional custom scopes for profiling, disable to avoid overheads
     "VLLM_CUSTOM_SCOPES_FOR_PROFILING":
     lambda: bool(int(os.getenv("VLLM_CUSTOM_SCOPES_FOR_PROFILING", "0"))),
+
+    # Frontier comparison: per-op CUDA event logging
+    "VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH":
+    lambda: os.getenv("VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH", None),
+    "VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES":
+    lambda: os.getenv("VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES", ""),
+    "VLLM_FRONTIER_RUNTIME_META_ENABLED":
+    lambda: bool(int(os.getenv("VLLM_FRONTIER_RUNTIME_META_ENABLED", "0"))),
 
     # Represent block hashes in KV cache events as 64-bit integers instead of
     # raw bytes. Defaults to True for backward compatibility.
