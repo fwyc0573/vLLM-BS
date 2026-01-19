@@ -25,6 +25,7 @@ FRONTIER_CUDA_EVENT_OP_LOG_PATH = os.environ.get(
     "VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH", "")
 FRONTIER_CUDA_EVENT_OP_SCOPES = os.environ.get(
     "VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES", "")
+FRONTIER_CUDA_EVENT_SCOPE_MODE = envs.VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE
 FRONTIER_CUDA_EVENT_OP_LOG_ENABLED = (
     FRONTIER_INSTRUMENTATION_ENABLED
     and bool(FRONTIER_CUDA_EVENT_OP_LOG_PATH)
@@ -493,6 +494,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     FRONTIER_CUDA_EVENT_OP_LOG_PATH,
                     scopes=scopes,
                     meta_enabled=FRONTIER_RUNTIME_META_ENABLED,
+                    scope_mode=FRONTIER_CUDA_EVENT_SCOPE_MODE,
                 )
                 logger.info("Frontier CUDA event per-op logging enabled")
             if FRONTIER_MOE_ROUTING_LOG_ENABLED:

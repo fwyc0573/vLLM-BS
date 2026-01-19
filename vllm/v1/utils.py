@@ -81,7 +81,8 @@ class FrontierCudaEventOpLogger:
     def __init__(self,
                  log_path: str,
                  scopes: Optional[Sequence[str]] = None,
-                 meta_enabled: bool = False) -> None:
+                 meta_enabled: bool = False,
+                 scope_mode: str = "default") -> None:
         if not log_path:
             raise ValueError("Frontier CUDA event log path is required.")
         log_dir = os.path.dirname(log_path)
@@ -100,6 +101,13 @@ class FrontierCudaEventOpLogger:
                                          torch.cuda.Event]] = []
         self._pending_meta: dict[str, dict[str, Any]] = {}
         self._meta_enabled = meta_enabled
+        scope_mode = scope_mode.strip().lower()
+        if scope_mode not in {"default", "kernel_only"}:
+            raise ValueError(
+                "VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE must be one of "
+                "['default', 'kernel_only']."
+            )
+        self._scope_mode = scope_mode
         self._batch_active = False
         self._batch_meta: dict[str, Any] = {}
 
@@ -132,6 +140,7 @@ class FrontierCudaEventOpLogger:
             "batch_num_tokens": batch_num_tokens,
             "batch_num_prefill_tokens": batch_num_prefill_tokens,
             "batch_num_decode_tokens": batch_num_decode_tokens,
+            "scope_mode": self._scope_mode,
         }
         if batch_request_num_tokens is not None:
             self._batch_meta["batch_request_num_tokens"] = batch_request_num_tokens
@@ -146,6 +155,9 @@ class FrontierCudaEventOpLogger:
         if op_name not in self._scopes:
             yield
             return
+        if self._scope_mode == "kernel_only":
+            # Synchronize before timing to remove queued work from the scope.
+            torch.cuda.synchronize()
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
         start_event.record()

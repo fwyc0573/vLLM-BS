@@ -134,6 +134,7 @@ if TYPE_CHECKING:
     # will raise an error during initialization (fail fast).
     VLLM_V1_ENABLE_CHUNKED_PREFILL: bool = True
     VLLM_V1_ENABLE_PREFIX_CACHING: bool = True
+    VLLM_V1_ALLOW_NO_CHUNKED_PREFILL: bool = False
     VLLM_TPU_BUCKET_PADDING_GAP: int = 0
     VLLM_TPU_MOST_MODEL_LEN: Optional[int] = None
     VLLM_TPU_USING_PATHWAYS: bool = False
@@ -142,6 +143,7 @@ if TYPE_CHECKING:
     VLLM_USE_DEEP_GEMM_E8M0_HOPPER: bool = False
     VLLM_SKIP_DEEP_GEMM_WARMUP: bool = False
     VLLM_USE_FUSED_MOE_GROUPED_TOPK: bool = True
+    VLLM_MOE_UNIFORM_ROUTING: bool = False
     VLLM_USE_FLASHINFER_MOE_FP8: bool = False
     VLLM_USE_FLASHINFER_MOE_FP4: bool = False
     VLLM_FLASHINFER_MOE_BACKEND: str = "throughput"
@@ -182,6 +184,7 @@ if TYPE_CHECKING:
     VLLM_CUSTOM_SCOPES_FOR_PROFILING: bool = False
     VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH: Optional[str] = None
     VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES: str = ""
+    VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE: str = "default"
     VLLM_FRONTIER_RUNTIME_META_ENABLED: bool = False
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
 
@@ -764,6 +767,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: bool(int(os.getenv("VLLM_V1_ENABLE_CHUNKED_PREFILL", "1"))),
     "VLLM_V1_ENABLE_PREFIX_CACHING":
     lambda: bool(int(os.getenv("VLLM_V1_ENABLE_PREFIX_CACHING", "1"))),
+    "VLLM_V1_ALLOW_NO_CHUNKED_PREFILL":
+    lambda: bool(int(os.getenv("VLLM_V1_ALLOW_NO_CHUNKED_PREFILL", "0"))),
 
     # Disable aiter ops unless specifically enabled.
     # Acts as a parent switch to enable the rest of the other operations.
@@ -1012,6 +1017,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Whether to use fused grouped_topk used for MoE expert selection.
     "VLLM_USE_FUSED_MOE_GROUPED_TOPK":
     lambda: bool(int(os.getenv("VLLM_USE_FUSED_MOE_GROUPED_TOPK", "1"))),
+
+    # Whether to use uniform routing for MoE expert selection.
+    # When enabled, tokens are distributed uniformly across experts (N/K per expert)
+    # instead of using the gating network's routing decisions.
+    # This is useful for profiling and comparison with simulators.
+    "VLLM_MOE_UNIFORM_ROUTING":
+    lambda: bool(int(os.getenv("VLLM_MOE_UNIFORM_ROUTING", "0"))),
 
     # Allow use of FlashInfer MoE kernels for fused moe ops.
     "VLLM_USE_FLASHINFER_MOE_FP8":
@@ -1262,6 +1274,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: os.getenv("VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH", None),
     "VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES":
     lambda: os.getenv("VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES", ""),
+    "VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE":
+    lambda: os.getenv("VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE", "default"),
     "VLLM_FRONTIER_RUNTIME_META_ENABLED":
     lambda: bool(int(os.getenv("VLLM_FRONTIER_RUNTIME_META_ENABLED", "0"))),
 
@@ -1336,6 +1350,7 @@ def compute_hash() -> str:
         "VLLM_USE_DEEP_GEMM_E8M0_HOPPER",
         "VLLM_USE_TRTLLM_FP4_GEMM",
         "VLLM_USE_FUSED_MOE_GROUPED_TOPK",
+        "VLLM_MOE_UNIFORM_ROUTING",
         "VLLM_USE_FLASHINFER_MOE_FP8",
         "VLLM_USE_FLASHINFER_MOE_FP4",
         "VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8",
