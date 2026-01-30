@@ -35,7 +35,9 @@ from vllm.model_executor.layers.quantization.base_config import (
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
-from vllm.v1.utils import record_function_or_nullcontext
+from vllm.v1.utils import (frontier_moe_routing_context,
+                           log_frontier_moe_routing_from_context,
+                           record_function_or_nullcontext)
 from vllm.utils import (cdiv, direct_register_custom_op, has_deep_ep, has_pplx,
                         round_up)
 
@@ -1476,12 +1478,14 @@ class FusedMoE(CustomOp):
             # Check if we should use a routing simulation strategy
             routing_strategy = envs.VLLM_MOE_ROUTING_SIMULATION_STRATEGY
             if routing_strategy != "":
-                return RoutingSimulator.simulate_routing(
+                topk_weights, topk_ids = RoutingSimulator.simulate_routing(
                     hidden_states=hidden_states,
                     router_logits=router_logits,
                     strategy_name=routing_strategy,
                     top_k=top_k,
                     indices_type=indices_type)
+                log_frontier_moe_routing_from_context(topk_ids)
+                return topk_weights, topk_ids
 
             # DeepSeekv2 uses grouped_top_k
             if use_grouped_topk:
@@ -1571,6 +1575,7 @@ class FusedMoE(CustomOp):
 
             topk_ids = topk_ids.to(dtype=indices_type)
 
+        log_frontier_moe_routing_from_context(topk_ids)
         assert topk_ids.dtype == indices_type or indices_type is None
 
         return topk_weights, topk_ids
@@ -1600,7 +1605,13 @@ class FusedMoE(CustomOp):
                 or self.use_deepep_ll_kernels):
             return final_hidden_states
         else:
-            return tensor_model_parallel_all_reduce(final_hidden_states)
+            op_name = ("expert_parallel_allreduce"
+                       if self.ep_size > 1 else "moe_tensor_parallel_allreduce")
+            with record_function_or_nullcontext(op_name):
+                return tensor_model_parallel_all_reduce(
+                    final_hidden_states,
+                    record_scope_name=None,
+                )
 
     def forward_native(
         self,
@@ -1680,27 +1691,37 @@ class FusedMoE(CustomOp):
             staged_router_logits.copy_(router_logits, non_blocking=True)
 
             # Matrix multiply.
-            final_hidden_states = self.quant_method.apply(
-                layer=self,
-                x=staged_hidden_states,
-                router_logits=staged_router_logits,
-                top_k=self.top_k,
-                renormalize=self.renormalize,
-                use_grouped_topk=self.use_grouped_topk,
-                global_num_experts=self.global_num_experts,
-                expert_map=self.expert_map,
-                topk_group=self.topk_group,
-                num_expert_group=self.num_expert_group,
-                custom_routing_function=self.custom_routing_function,
-                scoring_func=self.scoring_func,
-                routed_scaling_factor=self.routed_scaling_factor,
-                e_score_correction_bias=self.e_score_correction_bias,
-                activation=self.activation,
-                enable_eplb=self.enable_eplb,
-                expert_load_view=self.expert_load_view,
-                logical_to_physical_map=self.logical_to_physical_map,
-                logical_replica_count=self.logical_replica_count,
-            )
+            with frontier_moe_routing_context(
+                    layer_name=self.layer_name,
+                    num_tokens=chunk_size,
+                    router_topk=self.top_k,
+                    global_num_experts=self.global_num_experts,
+                    local_num_experts=self.local_num_experts,
+                    ep_rank=self.ep_rank,
+                    ep_size=self.ep_size,
+                    expert_map=self.expert_map,
+            ):
+                final_hidden_states = self.quant_method.apply(
+                    layer=self,
+                    x=staged_hidden_states,
+                    router_logits=staged_router_logits,
+                    top_k=self.top_k,
+                    renormalize=self.renormalize,
+                    use_grouped_topk=self.use_grouped_topk,
+                    global_num_experts=self.global_num_experts,
+                    expert_map=self.expert_map,
+                    topk_group=self.topk_group,
+                    num_expert_group=self.num_expert_group,
+                    custom_routing_function=self.custom_routing_function,
+                    scoring_func=self.scoring_func,
+                    routed_scaling_factor=self.routed_scaling_factor,
+                    e_score_correction_bias=self.e_score_correction_bias,
+                    activation=self.activation,
+                    enable_eplb=self.enable_eplb,
+                    expert_load_view=self.expert_load_view,
+                    logical_to_physical_map=self.logical_to_physical_map,
+                    logical_replica_count=self.logical_replica_count,
+                )
 
             assert self.shared_experts is None or isinstance(
                 final_hidden_states, tuple)
@@ -1782,32 +1803,44 @@ class FusedMoE(CustomOp):
             shared_output = None
 
         if do_naive_dispatch_combine:
-            hidden_states, router_logits = get_ep_group().dispatch(
-                hidden_states, router_logits)
+            with record_function_or_nullcontext(
+                    "expert_parallel_alltoall_dispatch"):
+                hidden_states, router_logits = get_ep_group().dispatch(
+                    hidden_states, router_logits)
 
         # Matrix multiply.
-        final_hidden_states = self.quant_method.apply(
-            layer=self,
-            x=hidden_states,
-            router_logits=router_logits,
-            top_k=self.top_k,
-            renormalize=self.renormalize,
-            use_grouped_topk=self.use_grouped_topk,
-            global_num_experts=self.global_num_experts,
-            expert_map=self.expert_map,
-            topk_group=self.topk_group,
-            num_expert_group=self.num_expert_group,
-            custom_routing_function=self.custom_routing_function,
-            scoring_func=self.scoring_func,
-            routed_scaling_factor=self.routed_scaling_factor,
-            e_score_correction_bias=self.e_score_correction_bias,
-            activation=self.activation,
-            apply_router_weight_on_input=self.apply_router_weight_on_input,
-            enable_eplb=self.enable_eplb,
-            expert_load_view=self.expert_load_view,
-            logical_to_physical_map=self.logical_to_physical_map,
-            logical_replica_count=self.logical_replica_count,
-        )
+        with frontier_moe_routing_context(
+                layer_name=self.layer_name,
+                num_tokens=hidden_states.shape[0],
+                router_topk=self.top_k,
+                global_num_experts=self.global_num_experts,
+                local_num_experts=self.local_num_experts,
+                ep_rank=self.ep_rank,
+                ep_size=self.ep_size,
+                expert_map=self.expert_map,
+        ):
+            final_hidden_states = self.quant_method.apply(
+                layer=self,
+                x=hidden_states,
+                router_logits=router_logits,
+                top_k=self.top_k,
+                renormalize=self.renormalize,
+                use_grouped_topk=self.use_grouped_topk,
+                global_num_experts=self.global_num_experts,
+                expert_map=self.expert_map,
+                topk_group=self.topk_group,
+                num_expert_group=self.num_expert_group,
+                custom_routing_function=self.custom_routing_function,
+                scoring_func=self.scoring_func,
+                routed_scaling_factor=self.routed_scaling_factor,
+                e_score_correction_bias=self.e_score_correction_bias,
+                activation=self.activation,
+                apply_router_weight_on_input=self.apply_router_weight_on_input,
+                enable_eplb=self.enable_eplb,
+                expert_load_view=self.expert_load_view,
+                logical_to_physical_map=self.logical_to_physical_map,
+                logical_replica_count=self.logical_replica_count,
+            )
 
         if shared_output is not None:
             assert not isinstance(final_hidden_states, tuple)
@@ -1820,7 +1853,9 @@ class FusedMoE(CustomOp):
         def reduce_output(states: torch.Tensor,
                           do_combine: bool = True) -> torch.Tensor:
             if do_naive_dispatch_combine and do_combine:
-                states = get_ep_group().combine(states)
+                with record_function_or_nullcontext(
+                        "expert_parallel_alltoall_combine"):
+                    states = get_ep_group().combine(states)
 
             if self.reduce_results and (self.tp_size > 1 or self.ep_size > 1):
                 states = self.maybe_all_reduce_tensor_model_parallel(states)

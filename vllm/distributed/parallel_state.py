@@ -840,6 +840,12 @@ class GroupCoordinator:
             self, hidden_states: torch.Tensor,
             router_logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if self.device_communicator is not None:
+            if self.unique_name.startswith("ep:"):
+                from vllm.v1.utils import record_function_or_nullcontext
+                with record_function_or_nullcontext(
+                        "expert_parallel_alltoall_dispatch"):
+                    return self.device_communicator.dispatch(
+                        hidden_states, router_logits)
             return self.device_communicator.dispatch(hidden_states,
                                                      router_logits)
         else:
@@ -847,6 +853,11 @@ class GroupCoordinator:
 
     def combine(self, hidden_states) -> torch.Tensor:
         if self.device_communicator is not None:
+            if self.unique_name.startswith("ep:"):
+                from vllm.v1.utils import record_function_or_nullcontext
+                with record_function_or_nullcontext(
+                        "expert_parallel_alltoall_combine"):
+                    return self.device_communicator.combine(hidden_states)
             return self.device_communicator.combine(hidden_states)
         else:
             return hidden_states

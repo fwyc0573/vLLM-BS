@@ -66,7 +66,7 @@ logger = init_logger(__name__)
 
 LORA_WARMUP_RANK = 8
 
-_NUM_WARMUP_ITERS = 2
+_NUM_WARMUP_ITERS = 3
 
 TModelInputForGPU = TypeVar('TModelInputForGPU', bound="ModelInputForGPU")
 

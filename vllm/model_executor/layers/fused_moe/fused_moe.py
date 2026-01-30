@@ -904,6 +904,67 @@ def dispatch_topk_func() -> Callable[..., tuple[torch.Tensor, ...]]:
     return vllm_topk_softmax
 
 
+def uniform_topk(
+    hidden_states: torch.Tensor,
+    gating_output: torch.Tensor,
+    topk: int,
+    indices_type: Optional[torch.dtype] = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Generate uniform expert routing for MoE models.
+
+    Instead of using the gating network's routing decisions, this function
+    distributes tokens uniformly across experts in a deterministic round-robin
+    fashion. Each token selects topk consecutive experts starting from
+    (token_idx * topk) % num_experts.
+
+    This is useful for:
+    - Profiling MoE models with predictable load distribution
+    - Comparing vLLM execution with simulators that assume uniform routing
+    - Eliminating routing variance in performance measurements
+
+    Args:
+        hidden_states: Input tensor [num_tokens, hidden_dim]
+        gating_output: Gating logits [num_tokens, num_experts] (used only for shape)
+        topk: Number of experts to select per token
+        indices_type: Optional dtype for expert indices
+
+    Returns:
+        topk_weights: Uniform weights [num_tokens, topk], all equal to 1/topk
+        topk_ids: Expert indices [num_tokens, topk], round-robin assignment
+        token_expert_indices: Token-expert mapping [num_tokens, topk]
+    """
+    M = hidden_states.size(0)  # num_tokens
+    num_experts = gating_output.size(1)
+
+    # Uniform weights: each selected expert gets equal weight
+    topk_weights = torch.full(
+        (M, topk),
+        1.0 / topk,
+        dtype=torch.float32,
+        device=hidden_states.device,
+    )
+
+    # Round-robin expert assignment: token i selects experts starting from (i * topk) % num_experts
+    # This ensures uniform distribution across experts over many tokens
+    topk_ids = torch.empty(
+        M,
+        topk,
+        dtype=torch.int32 if indices_type is None else indices_type,
+        device=hidden_states.device,
+    )
+
+    # Generate expert indices for each token
+    token_indices = torch.arange(M, device=hidden_states.device)
+    for k in range(topk):
+        topk_ids[:, k] = (token_indices * topk + k) % num_experts
+
+    # Token-expert indices (same as topk_ids for uniform routing)
+    token_expert_indices = topk_ids.clone().to(torch.int32)
+
+    return topk_weights, topk_ids, token_expert_indices
+
+
 def fused_topk(
     hidden_states: torch.Tensor,
     gating_output: torch.Tensor,
@@ -913,6 +974,10 @@ def fused_topk(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     assert hidden_states.size(0) == gating_output.size(0), (
         "Number of tokens mismatch")
+
+    # Check for uniform routing mode
+    if envs.VLLM_MOE_UNIFORM_ROUTING:
+        return uniform_topk(hidden_states, gating_output, topk, indices_type)
 
     M, _ = hidden_states.size()
 
@@ -953,6 +1018,12 @@ def grouped_topk(
     routed_scaling_factor: float = 1.0,
     e_score_correction_bias: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # Check for uniform routing mode (bypass all grouped topk logic)
+    if envs.VLLM_MOE_UNIFORM_ROUTING:
+        topk_weights, topk_ids, _ = uniform_topk(
+            hidden_states, gating_output, topk)
+        return topk_weights, topk_ids
+
     if envs.VLLM_USE_FUSED_MOE_GROUPED_TOPK and \
             current_platform.is_cuda() and \
             num_expert_group <= 32 and topk <= 32 and \

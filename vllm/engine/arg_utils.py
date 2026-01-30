@@ -1626,9 +1626,14 @@ class EngineArgs:
             if self.enable_chunked_prefill is None:
                 self.enable_chunked_prefill = envs.VLLM_V1_ENABLE_CHUNKED_PREFILL
             if not self.enable_chunked_prefill:
-                raise ValueError(
-                    "V1 generate requires chunked prefill. Please set "
-                    "VLLM_V1_ENABLE_CHUNKED_PREFILL=1.")
+                if not envs.VLLM_V1_ALLOW_NO_CHUNKED_PREFILL:
+                    raise ValueError(
+                        "V1 generate requires chunked prefill. Please set "
+                        "VLLM_V1_ENABLE_CHUNKED_PREFILL=1.")
+                logger.warning(
+                    "V1 generate running with chunked prefill disabled "
+                    "(VLLM_V1_ALLOW_NO_CHUNKED_PREFILL=1). "
+                    "This is intended for controlled comparisons only.")
             if self.enable_prefix_caching is None:
                 self.enable_prefix_caching = envs.VLLM_V1_ENABLE_PREFIX_CACHING
         else:

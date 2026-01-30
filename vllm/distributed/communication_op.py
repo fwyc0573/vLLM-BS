@@ -7,11 +7,19 @@ import torch
 import torch.distributed
 
 from .parallel_state import get_tp_group
+from vllm.v1.utils import record_function_or_nullcontext
 
 
-def tensor_model_parallel_all_reduce(input_: torch.Tensor) -> torch.Tensor:
+def tensor_model_parallel_all_reduce(
+        input_: torch.Tensor,
+        record_scope_name: Optional[str] = "tensor_parallel_allreduce",
+) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group."""
-    return get_tp_group().all_reduce(input_)
+    tp_group = get_tp_group()
+    if record_scope_name and tp_group.world_size > 1:
+        with record_function_or_nullcontext(record_scope_name):
+            return tp_group.all_reduce(input_)
+    return tp_group.all_reduce(input_)
 
 
 def tensor_model_parallel_all_gather(input_: torch.Tensor,

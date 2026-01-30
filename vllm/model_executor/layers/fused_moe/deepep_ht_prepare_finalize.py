@@ -11,6 +11,7 @@ from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
     TopKWeightAndReduceContiguous, TopKWeightAndReduceDelegate)
 from vllm.model_executor.layers.fused_moe.utils import (
     moe_kernel_quantize_input)
+from vllm.v1.utils import record_function_or_nullcontext
 
 
 class DeepEPHTPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
@@ -84,25 +85,27 @@ class DeepEPHTPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
         if has_scales:
             token_data = (tokens, token_scales)
 
-        (
-            token_data, expert_topk_ids, expert_topk_weights,
-            expert_num_tokens_per_expert_list, self.handle, event
-        ) = self.buffer.dispatch(
-            x=token_data,
-            handle=None,
-            num_tokens_per_rank=num_tokens_per_rank,
-            num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
-            is_token_in_rank=is_token_in_rank,
-            num_tokens_per_expert=dispatch_expert_num_tokens,
-            topk_idx=rank_topk_ids,
-            topk_weights=rank_topk_weights,
-            # expert_alignment rounds the number of tokens per expert
-            # to this value.
-            expert_alignment=1,
-            config=self._get_dispatch_config(),
-            previous_event=None,
-            async_finish=self.async_prepare,
-            allocate_on_comm_stream=False)
+        with record_function_or_nullcontext(
+                "expert_parallel_alltoall_dispatch"):
+            (
+                token_data, expert_topk_ids, expert_topk_weights,
+                expert_num_tokens_per_expert_list, self.handle, event
+            ) = self.buffer.dispatch(
+                x=token_data,
+                handle=None,
+                num_tokens_per_rank=num_tokens_per_rank,
+                num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+                is_token_in_rank=is_token_in_rank,
+                num_tokens_per_expert=dispatch_expert_num_tokens,
+                topk_idx=rank_topk_ids,
+                topk_weights=rank_topk_weights,
+                # expert_alignment rounds the number of tokens per expert
+                # to this value.
+                expert_alignment=1,
+                config=self._get_dispatch_config(),
+                previous_event=None,
+                async_finish=self.async_prepare,
+                allocate_on_comm_stream=False)
 
         return lambda: self._receiver(
             event,
@@ -268,13 +271,15 @@ class DeepEPHTPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
                 apply_router_weight_on_input=apply_router_weight_on_input,
             )
 
-        combined_x, _, event = self.buffer.combine(
-            x=fused_expert_output,
-            handle=self.handle,
-            topk_weights=None,
-            config=self._get_combine_config(),
-            previous_event=None,
-            async_finish=False,
-            allocate_on_comm_stream=False)
+        with record_function_or_nullcontext(
+                "expert_parallel_alltoall_combine"):
+            combined_x, _, event = self.buffer.combine(
+                x=fused_expert_output,
+                handle=self.handle,
+                topk_weights=None,
+                config=self._get_combine_config(),
+                previous_event=None,
+                async_finish=False,
+                allocate_on_comm_stream=False)
         # Respect inplace outputs.
         output.copy_(combined_x, non_blocking=True)

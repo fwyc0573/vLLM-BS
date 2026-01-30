@@ -371,11 +371,16 @@ class PhiMoEAttention(nn.Module):
         positions: torch.Tensor,
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
-        qkv, _ = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q, k = self.rotary_emb(positions, q, k)
-        attn_output = self.attn(q, k, v)
-        output, _ = self.o_proj(attn_output)
+        with record_function_or_nullcontext("attn_pre_proj"):
+            qkv, _ = self.qkv_proj(hidden_states)
+            q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size],
+                                dim=-1)
+        with record_function_or_nullcontext("attn_rope"):
+            q, k = self.rotary_emb(positions, q, k)
+        with record_function_or_nullcontext("attn"):
+            attn_output = self.attn(q, k, v)
+        with record_function_or_nullcontext("attn_post_proj"):
+            output, _ = self.o_proj(attn_output)
         return output
 
 
@@ -429,20 +434,24 @@ class PhiMoEDecoderLayer(nn.Module):
         residual = hidden_states
 
         # Self Attention
-        hidden_states = self.input_layernorm(hidden_states)
+        with record_function_or_nullcontext("input_layernorm"):
+            hidden_states = self.input_layernorm(hidden_states)
 
         hidden_states = self.self_attn(
             positions=positions,
             hidden_states=hidden_states,
         )
-        hidden_states = hidden_states + residual
+        with record_function_or_nullcontext("add"):
+            hidden_states = hidden_states + residual
 
         # Fully Connected
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
+        with record_function_or_nullcontext("post_attention_layernorm"):
+            hidden_states = self.post_attention_layernorm(hidden_states)
         hidden_states = self.block_sparse_moe(hidden_states)
 
-        hidden_states = hidden_states + residual
+        with record_function_or_nullcontext("add"):
+            hidden_states = hidden_states + residual
         return hidden_states, residual
 
 

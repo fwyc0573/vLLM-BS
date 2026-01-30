@@ -13,6 +13,7 @@ from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
 from vllm.model_executor.layers.fused_moe.utils import (
     _validate_scale_shape, moe_kernel_quantize_input)
 from vllm.utils import cdiv, round_up
+from vllm.v1.utils import record_function_or_nullcontext
 
 logger = init_logger(__name__)
 
@@ -202,17 +203,19 @@ class PplxPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
         # There's not much point setting this unless it is != indices.size(0)
         bound_m: Optional[torch.Tensor] = None
 
-        self.a2a.dispatch(
-            out_expert_num_tokens=expert_num_tokens,
-            out_expert_x=expert_x,
-            out_expert_x_scale=expert_x_scale,
-            dp_x=a1q,
-            dp_x_scale=a1q_scale,
-            indices=topk_ids,
-            bound_m=bound_m,
-            do_send=True,
-            do_recv=False,
-        )
+        with record_function_or_nullcontext(
+                "expert_parallel_alltoall_dispatch"):
+            self.a2a.dispatch(
+                out_expert_num_tokens=expert_num_tokens,
+                out_expert_x=expert_x,
+                out_expert_x_scale=expert_x_scale,
+                dp_x=a1q,
+                dp_x_scale=a1q_scale,
+                indices=topk_ids,
+                bound_m=bound_m,
+                do_send=True,
+                do_recv=False,
+            )
 
         return lambda: self._receiver(
             expert_num_tokens,
@@ -237,17 +240,19 @@ class PplxPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
         orig_a_scale_block_shape: Optional[int],
     ) -> mk.PrepareResultType:
 
-        self.a2a.dispatch(
-            out_expert_num_tokens=expert_num_tokens,
-            out_expert_x=expert_x,
-            out_expert_x_scale=expert_x_scale,
-            dp_x=a1q,
-            dp_x_scale=a1q_scale,
-            indices=topk_ids,
-            bound_m=bound_m,
-            do_send=False,
-            do_recv=True,
-        )
+        with record_function_or_nullcontext(
+                "expert_parallel_alltoall_dispatch"):
+            self.a2a.dispatch(
+                out_expert_num_tokens=expert_num_tokens,
+                out_expert_x=expert_x,
+                out_expert_x_scale=expert_x_scale,
+                dp_x=a1q,
+                dp_x_scale=a1q_scale,
+                indices=topk_ids,
+                bound_m=bound_m,
+                do_send=False,
+                do_recv=True,
+            )
 
         if expert_x_scale is not None:
             expert_x_scale = expert_x_scale[:, :, :orig_a_scale_block_shape]
@@ -314,8 +319,10 @@ class PplxPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
         if apply_router_weight_on_input:
             topk_weights = torch.ones_like(topk_weights)
 
-        self.a2a.combine(out_tokens=output,
-                         indices=topk_ids.view(dtype=torch.uint32),
-                         weights=topk_weights,
-                         expert_y=fused_expert_output,
-                         bound_m=bound_m)
+        with record_function_or_nullcontext(
+                "expert_parallel_alltoall_combine"):
+            self.a2a.combine(out_tokens=output,
+                             indices=topk_ids.view(dtype=torch.uint32),
+                             weights=topk_weights,
+                             expert_y=fused_expert_output,
+                             bound_m=bound_m)

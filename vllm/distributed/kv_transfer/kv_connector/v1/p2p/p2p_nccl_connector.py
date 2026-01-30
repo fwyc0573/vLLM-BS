@@ -17,6 +17,7 @@ from vllm.logger import init_logger
 from vllm.utils import get_ip
 from vllm.v1.attention.backends.mla.common import MLACommonMetadata
 from vllm.v1.core.sched.output import SchedulerOutput
+from vllm.v1.utils import record_function_or_nullcontext
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionMetadata
@@ -208,8 +209,9 @@ class P2pNcclConnector(KVConnectorBase_V1):
 
                 layer = kv_cache[forward_context.virtual_engine]
 
-                kv_cache = self.p2p_nccl_engine.recv_tensor(
-                    request.request_id + "#" + layer_name)
+                with record_function_or_nullcontext("kv_p2p_recv"):
+                    kv_cache = self.p2p_nccl_engine.recv_tensor(
+                        request.request_id + "#" + layer_name)
 
                 if kv_cache is None:
                     logger.warning("🚧kv_cache is None, %s", request.request_id)
@@ -302,8 +304,9 @@ class P2pNcclConnector(KVConnectorBase_V1):
                 remote_address = base_ip + ":" + str(int(self.config.kv_port) + remote_port_offset)
 
             kv_cache = extract_kv_from_layer(kv_layer, request.block_ids)
-            self.p2p_nccl_engine.send_tensor(request_id + "#" + layer_name,
-                                             kv_cache, remote_address)
+            with record_function_or_nullcontext("kv_p2p_send"):
+                self.p2p_nccl_engine.send_tensor(request_id + "#" + layer_name,
+                                                 kv_cache, remote_address)
 
     def wait_for_save(self):
         if self.is_producer:

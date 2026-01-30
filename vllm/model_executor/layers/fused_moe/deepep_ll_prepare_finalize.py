@@ -11,6 +11,7 @@ from vllm.model_executor.layers.fused_moe.topk_weight_and_reduce import (
     TopKWeightAndReduceDelegate)
 from vllm.model_executor.layers.fused_moe.utils import (
     moe_kernel_quantize_input, normalize_batched_scales_shape)
+from vllm.v1.utils import record_function_or_nullcontext
 
 # DeepEP kernels quantize dispatch inputs in 128 element chunks.
 DEEPEP_QUANT_BLOCK_SIZE = 128
@@ -148,14 +149,17 @@ class DeepEPLLPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
             a1 = a1 * topk_weights.to(a1.dtype)
 
         # Dispatch
-        expert_x, expert_num_tokens, self.handle, event, hook = \
-                self.buffer.low_latency_dispatch(a1,
-                                                topk_ids,
-                                                self.max_tokens_per_rank,
-                                                num_experts,
-                                                use_fp8=self.use_fp8_dispatch,
-                                                async_finish=False,
-                                                return_recv_hook=True)
+        with record_function_or_nullcontext(
+                "expert_parallel_alltoall_dispatch"):
+            expert_x, expert_num_tokens, self.handle, event, hook = \
+                self.buffer.low_latency_dispatch(
+                    a1,
+                    topk_ids,
+                    self.max_tokens_per_rank,
+                    num_experts,
+                    use_fp8=self.use_fp8_dispatch,
+                    async_finish=False,
+                    return_recv_hook=True)
 
         return lambda: self._receiver(hook, expert_x, expert_num_tokens,
                                       a1_scale, a1.dtype, quant_config)
@@ -218,12 +222,14 @@ class DeepEPLLPrepareAndFinalize(mk.FusedMoEPrepareAndFinalize):
             combine_topk_weights = torch.ones_like(topk_weights)
 
         # TODO (varun) : Enable zero copy mode
-        _, event, hook = self.buffer.low_latency_combine(
-            fused_expert_output,
-            topk_ids,
-            combine_topk_weights,
-            self.handle,
-            async_finish=False,
-            zero_copy=False,
-            return_recv_hook=False,
-            out=output)
+        with record_function_or_nullcontext(
+                "expert_parallel_alltoall_combine"):
+            _, event, hook = self.buffer.low_latency_combine(
+                fused_expert_output,
+                topk_ids,
+                combine_topk_weights,
+                self.handle,
+                async_finish=False,
+                zero_copy=False,
+                return_recv_hook=False,
+                out=output)
