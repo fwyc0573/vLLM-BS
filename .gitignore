@@ -178,6 +178,10 @@ cython_debug/
 # Claude
 CLAUDE.md
 .claude/
+.task_memory/
+
+# Kiro
+.kiro/
 
 # Codex
 AGENTS.md
