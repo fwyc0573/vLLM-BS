@@ -82,6 +82,9 @@ def _log_flow(message: str) -> None:
 _FRONTIER_SCHED_LOG_PATH = _flow_os.environ.get(
     "VLLM_FRONTIER_SCHED_LOG_PATH", "")
 _frontier_sched_logger: _flow_logging.Logger | None = None
+_FRONTIER_SCHED_DECISION_LOG_PATH = _flow_os.environ.get(
+    "VLLM_FRONTIER_SCHED_DECISION_LOG_PATH", "")
+_frontier_sched_decision_logger: _flow_logging.Logger | None = None
 
 if _FRONTIER_SCHED_LOG_PATH:
     _frontier_sched_logger = _flow_logging.getLogger("vllm.frontier_sched")
@@ -98,11 +101,35 @@ if _FRONTIER_SCHED_LOG_PATH:
     logger.info("Frontier schedule logging ENABLED. Log path: %s",
                 _FRONTIER_SCHED_LOG_PATH)
 
+if _FRONTIER_SCHED_DECISION_LOG_PATH:
+    _frontier_sched_decision_logger = _flow_logging.getLogger(
+        "vllm.frontier_sched_decision")
+    _frontier_sched_decision_logger.setLevel(_flow_logging.INFO)
+    _frontier_sched_decision_logger.propagate = False
+
+    _frontier_decision_dir = _flow_os.path.dirname(
+        _FRONTIER_SCHED_DECISION_LOG_PATH)
+    if _frontier_decision_dir:
+        _flow_os.makedirs(_frontier_decision_dir, exist_ok=True)
+
+    _frontier_decision_handler = _flow_logging.FileHandler(
+        _FRONTIER_SCHED_DECISION_LOG_PATH)
+    _frontier_decision_handler.setFormatter(_flow_logging.Formatter("%(message)s"))
+    _frontier_sched_decision_logger.addHandler(_frontier_decision_handler)
+    logger.info("Frontier schedule decision logging ENABLED. Log path: %s",
+                _FRONTIER_SCHED_DECISION_LOG_PATH)
+
 
 def _log_frontier_schedule(event: dict[str, Any]) -> None:
     if _frontier_sched_logger is None:
         return
     _frontier_sched_logger.info(_frontier_json.dumps(event))
+
+
+def _log_frontier_schedule_decision(event: dict[str, Any]) -> None:
+    if _frontier_sched_decision_logger is None:
+        return
+    _frontier_sched_decision_logger.info(_frontier_json.dumps(event))
 
 
 class Scheduler(SchedulerInterface):
@@ -241,6 +268,51 @@ class Scheduler(SchedulerInterface):
         )
         self.use_pp = self.parallel_config.pipeline_parallel_size > 1
         self._frontier_schedule_step = 0
+        self._frontier_cluster_type = _flow_os.environ.get(
+            "VLLM_FRONTIER_CLUSTER_TYPE", "MONOLITHIC")
+
+    def _emit_frontier_schedule_decision(
+        self,
+        *,
+        event: str,
+        decision_result: Optional[str],
+        request_id: Optional[str],
+        token_budget: int,
+        num_tokens: int,
+        available_blocks: Optional[int] = None,
+        batch_request_ids: Optional[list[str]] = None,
+        request_num_tokens: Optional[list[int]] = None,
+        batch_size: int = 0,
+        batch_num_tokens: int = 0,
+    ) -> None:
+        if _frontier_sched_decision_logger is None:
+            return
+
+        if available_blocks is None:
+            available_blocks = self.kv_cache_manager.block_pool.get_num_free_blocks()
+
+        payload: dict[str, Any] = {
+            "event": event,
+            "source": "vllm",
+            "scheduler": "vllm_v1",
+            "cluster_type": self._frontier_cluster_type,
+            "iteration_id": int(self._frontier_schedule_step),
+            "decision_result": decision_result,
+            "request_id": request_id,
+            "token_budget": int(token_budget),
+            "available_blocks": int(available_blocks),
+            "num_tokens": int(num_tokens),
+            "num_running_reqs": len(self.running),
+            "num_waiting_reqs": len(self.waiting),
+            "max_num_running_reqs": int(self.max_num_running_reqs),
+            "max_num_scheduled_tokens": int(self.max_num_scheduled_tokens),
+            "batch_request_ids": list(batch_request_ids or []),
+            "request_num_tokens": [int(v) for v in (request_num_tokens or [])],
+            "batch_size": int(batch_size),
+            "batch_num_tokens": int(batch_num_tokens),
+            "timestamp": time.time(),
+        }
+        _log_frontier_schedule_decision(payload)
 
     def schedule(self) -> SchedulerOutput:
         # NOTE(woosuk) on the scheduling algorithm:
@@ -273,6 +345,18 @@ class Scheduler(SchedulerInterface):
 
         # Flow validation: log iteration start with initial state
         _available_blocks = self.kv_cache_manager.block_pool.get_num_free_blocks()
+        self._emit_frontier_schedule_decision(
+            event="iteration_start",
+            decision_result=None,
+            request_id=None,
+            token_budget=token_budget,
+            num_tokens=0,
+            available_blocks=_available_blocks,
+            batch_request_ids=[],
+            request_num_tokens=[],
+            batch_size=0,
+            batch_num_tokens=0,
+        )
         _log_flow(
             f"[ITERATION_START] token_budget={token_budget}, "
             f"running_count={len(self.running)}, "
@@ -433,6 +517,13 @@ class Scheduler(SchedulerInterface):
 
                     self.waiting.prepend_request(preempted_req)
                     preempted_reqs.append(preempted_req)
+                    self._emit_frontier_schedule_decision(
+                        event="decision",
+                        decision_result="PREEMPTED",
+                        request_id=preempted_req.request_id,
+                        token_budget=token_budget,
+                        num_tokens=0,
+                    )
                     if preempted_req == request:
                         # No more request to preempt.
                         can_schedule = False
@@ -451,6 +542,13 @@ class Scheduler(SchedulerInterface):
             num_scheduled_tokens[request.request_id] = num_new_tokens
             token_budget -= num_new_tokens
             req_index += 1
+            self._emit_frontier_schedule_decision(
+                event="decision",
+                decision_result="RUNNING_SCHEDULED",
+                request_id=request.request_id,
+                token_budget=token_budget,
+                num_tokens=num_new_tokens,
+            )
 
             # Flow validation: log RUNNING request scheduled
             _num_new_blocks = sum(len(group) for group in new_blocks.blocks) if new_blocks else 0
@@ -720,6 +818,13 @@ class Scheduler(SchedulerInterface):
                 token_budget -= num_new_tokens
                 request.status = RequestStatus.RUNNING
                 request.num_computed_tokens = num_computed_tokens
+                self._emit_frontier_schedule_decision(
+                    event="decision",
+                    decision_result="ADMISSION",
+                    request_id=request.request_id,
+                    token_budget=token_budget,
+                    num_tokens=num_new_tokens,
+                )
 
                 # Flow validation: log WAITING request admission
                 _allocated_blocks = self.kv_cache_manager.get_blocks(
@@ -834,6 +939,28 @@ class Scheduler(SchedulerInterface):
             get_freed_mm_hashes(),
             structured_output_request_ids=structured_output_request_ids,
             grammar_bitmask=grammar_bitmask,
+        )
+
+        ordered_batch_request_ids = [
+            req.request_id
+            for req in (
+                scheduled_new_reqs + scheduled_resumed_reqs + scheduled_running_reqs
+            )
+        ]
+        ordered_request_num_tokens = [
+            int(num_scheduled_tokens[req_id]) for req_id in ordered_batch_request_ids
+        ]
+        self._emit_frontier_schedule_decision(
+            event="iteration_end",
+            decision_result=None,
+            request_id=None,
+            token_budget=token_budget,
+            num_tokens=total_num_scheduled_tokens,
+            available_blocks=self.kv_cache_manager.block_pool.get_num_free_blocks(),
+            batch_request_ids=ordered_batch_request_ids,
+            request_num_tokens=ordered_request_num_tokens,
+            batch_size=len(ordered_batch_request_ids),
+            batch_num_tokens=total_num_scheduled_tokens,
         )
 
         _log_frontier_schedule({
