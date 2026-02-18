@@ -2215,6 +2215,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         moe_logger_context = (frontier_moe_logger.activate()
                               if frontier_moe_logger is not None else
                               nullcontext())
+        frontier_batch_scope = (record_function_or_nullcontext(
+            f"frontier_batch_{self._frontier_batch_id}")
+                                if trace_active else nullcontext())
         with (set_forward_context(
                 attn_metadata,
                 self.vllm_config,
@@ -2222,7 +2225,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 num_tokens_across_dp=num_tokens_across_dp,
                 cudagraph_runtime_mode=cudagraph_runtime_mode,
                 batch_descriptor=batch_descriptor,
-        ), record_function_or_nullcontext("Forward"), op_logger_context,
+        ), frontier_batch_scope, record_function_or_nullcontext("Forward"),
+              op_logger_context,
               moe_logger_context,
               self.maybe_get_kv_connector_output(scheduler_output) as
               kv_connector_output):

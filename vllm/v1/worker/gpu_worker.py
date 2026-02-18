@@ -81,6 +81,17 @@ class Worker(WorkerBase):
                 envs.VLLM_TORCH_PROFILER_WITH_STACK,
                 envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
             )
+            schedule = None
+            if (envs.VLLM_TORCH_PROFILER_WAIT > 0
+                    or envs.VLLM_TORCH_PROFILER_WARMUP > 0
+                    or envs.VLLM_TORCH_PROFILER_ACTIVE > 0
+                    or envs.VLLM_TORCH_PROFILER_REPEAT > 0):
+                schedule = torch.profiler.schedule(
+                    wait=envs.VLLM_TORCH_PROFILER_WAIT,
+                    warmup=envs.VLLM_TORCH_PROFILER_WARMUP,
+                    active=envs.VLLM_TORCH_PROFILER_ACTIVE,
+                    repeat=envs.VLLM_TORCH_PROFILER_REPEAT,
+                )
             self.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
@@ -90,6 +101,7 @@ class Worker(WorkerBase):
                 profile_memory=envs.VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY,
                 with_stack=envs.VLLM_TORCH_PROFILER_WITH_STACK,
                 with_flops=envs.VLLM_TORCH_PROFILER_WITH_FLOPS,
+                schedule=schedule,
                 on_trace_ready=torch.profiler.tensorboard_trace_handler(
                     torch_profiler_trace_dir, use_gzip=True))
         else:

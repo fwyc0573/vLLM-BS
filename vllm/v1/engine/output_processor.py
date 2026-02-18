@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 import asyncio
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any, Optional, Union, cast
@@ -19,8 +20,8 @@ from vllm.v1.engine import EngineCoreOutput, EngineCoreRequest, FinishReason
 from vllm.v1.engine.detokenizer import IncrementalDetokenizer
 from vllm.v1.engine.logprobs import LogprobsProcessor
 from vllm.v1.engine.parallel_sampling import ParentRequest
-from vllm.v1.metrics.stats import (IterationStats, LoRARequestStates,
-                                   RequestStateStats)
+from vllm.v1.metrics.stats import (FrontierRequestMetrics, IterationStats,
+                                   LoRARequestStates, RequestStateStats)
 
 
 class RequestOutputCollector:
@@ -237,6 +238,11 @@ class RequestState:
         else:
             prompt_logprobs = self.logprobs_processor.prompt_logprobs
 
+        frontier_metrics = self._build_frontier_metrics(
+            request_id=request_id,
+            finished=finished,
+        )
+
         return RequestOutput(
             request_id=request_id,
             prompt=self.prompt,
@@ -244,8 +250,52 @@ class RequestState:
             prompt_logprobs=prompt_logprobs,
             outputs=cast(list[CompletionOutput], outputs),
             finished=finished,
+            metrics=frontier_metrics,
             kv_transfer_params=kv_transfer_params,
             num_cached_tokens=self.num_cached_tokens,
+        )
+
+    def _build_frontier_metrics(
+        self,
+        request_id: str,
+        finished: bool,
+    ) -> Optional[FrontierRequestMetrics]:
+        # Parent requests (n > 1) merge child streams; per-request metrics are
+        # only well-defined on leaf requests.
+        if self.parent_req is not None or not finished or self.stats is None:
+            return None
+
+        completion_time = time.time()
+        arrival_time = self.stats.arrival_time
+        decode_tokens = self.stats.num_generation_tokens
+        ttft_ms = max(self.stats.first_token_latency, 0.0) * 1000.0
+        request_e2e_time_ms = max(completion_time - arrival_time, 0.0) * 1000.0
+
+        if decode_tokens <= 1:
+            tpot_ms = 0.0
+        else:
+            decode_span_s = max(
+                self.stats.last_token_ts - self.stats.first_token_ts, 0.0)
+            tpot_ms = (decode_span_s / (decode_tokens - 1)) * 1000.0
+
+        if self.stats.scheduled_ts > 0.0:
+            model_exec_time_ms = max(
+                self.stats.last_token_ts - self.stats.scheduled_ts,
+                0.0,
+            ) * 1000.0
+        else:
+            model_exec_time_ms = 0.0
+
+        return FrontierRequestMetrics(
+            request_id=request_id,
+            request_e2e_time=request_e2e_time_ms,
+            ttft=ttft_ms,
+            tpot=tpot_ms,
+            request_model_execution_time=model_exec_time_ms,
+            request_num_prefill_tokens=self.prompt_len,
+            request_num_decode_tokens=decode_tokens,
+            arrival_time=arrival_time,
+            completion_time=completion_time,
         )
 
     def _new_completion_output(

@@ -1301,6 +1301,14 @@ class RowParallelLinear(LinearBase):
 
         param.load_row_parallel_weight(loaded_weight=loaded_weight)
 
+    def _resolve_tp_allreduce_scope_name(self) -> str:
+        # Frontier per-op comparison needs stable comm scope names for TP allreduce.
+        if self.prefix.endswith(".o_proj"):
+            return "attn_post_proj_tp_allreduce"
+        if self.prefix.endswith(".down_proj"):
+            return "mlp_down_proj_tp_allreduce"
+        return "tensor_parallel_allreduce"
+
     def forward(
         self, input_
     ) -> Union[torch.Tensor, tuple[torch.Tensor, Optional[Parameter]]]:
@@ -1320,7 +1328,11 @@ class RowParallelLinear(LinearBase):
                                                   input_parallel,
                                                   bias=bias_)
         if self.reduce_results and self.tp_size > 1:
-            output = tensor_model_parallel_all_reduce(output_parallel)
+            record_scope_name = self._resolve_tp_allreduce_scope_name()
+            output = tensor_model_parallel_all_reduce(
+                output_parallel,
+                record_scope_name=record_scope_name,
+            )
         else:
             output = output_parallel
 

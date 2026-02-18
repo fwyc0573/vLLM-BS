@@ -89,6 +89,10 @@ if TYPE_CHECKING:
     VLLM_TORCH_PROFILER_WITH_PROFILE_MEMORY: bool = False
     VLLM_TORCH_PROFILER_WITH_STACK: bool = True
     VLLM_TORCH_PROFILER_WITH_FLOPS: bool = False
+    VLLM_TORCH_PROFILER_WAIT: int = 0
+    VLLM_TORCH_PROFILER_WARMUP: int = 0
+    VLLM_TORCH_PROFILER_ACTIVE: int = 0
+    VLLM_TORCH_PROFILER_REPEAT: int = 0
     VLLM_USE_TRITON_AWQ: bool = False
     VLLM_ALLOW_RUNTIME_LORA_UPDATING: bool = False
     VLLM_SKIP_P2P_CHECK: bool = False
@@ -730,6 +734,18 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # not profile flops.
     "VLLM_TORCH_PROFILER_WITH_FLOPS":
     lambda: bool(os.getenv("VLLM_TORCH_PROFILER_WITH_FLOPS", "0") != "0"),
+
+    # Optional torch profiler schedule controls.
+    # If any of these is > 0, worker will create torch.profiler.schedule(...)
+    # with the provided values.
+    "VLLM_TORCH_PROFILER_WAIT":
+    lambda: int(os.getenv("VLLM_TORCH_PROFILER_WAIT", "0")),
+    "VLLM_TORCH_PROFILER_WARMUP":
+    lambda: int(os.getenv("VLLM_TORCH_PROFILER_WARMUP", "0")),
+    "VLLM_TORCH_PROFILER_ACTIVE":
+    lambda: int(os.getenv("VLLM_TORCH_PROFILER_ACTIVE", "0")),
+    "VLLM_TORCH_PROFILER_REPEAT":
+    lambda: int(os.getenv("VLLM_TORCH_PROFILER_REPEAT", "0")),
 
     # If set, vLLM will use Triton implementations of AWQ.
     "VLLM_USE_TRITON_AWQ":
