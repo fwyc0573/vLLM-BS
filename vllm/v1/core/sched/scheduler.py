@@ -623,7 +623,7 @@ class Scheduler(SchedulerInterface):
                             "%s is still in WAITING_FOR_REMOTE_KVS state.",
                             request.request_id)
                         self.waiting.pop_request()
-                        skipped_waiting_requests.prepend_request(request)
+                        skipped_waiting_requests.add_request(request)
                         continue
 
                 # Skip request if the structured output request is still waiting
@@ -634,7 +634,7 @@ class Scheduler(SchedulerInterface):
                         request.status = RequestStatus.WAITING
                     else:
                         self.waiting.pop_request()
-                        skipped_waiting_requests.prepend_request(request)
+                        skipped_waiting_requests.add_request(request)
                         continue
 
                 # Check that adding the request still respects the max_loras
@@ -644,7 +644,7 @@ class Scheduler(SchedulerInterface):
                      request.lora_request.lora_int_id not in scheduled_loras)):
                     # Scheduling would exceed max_loras, skip.
                     self.waiting.pop_request()
-                    skipped_waiting_requests.prepend_request(request)
+                    skipped_waiting_requests.add_request(request)
                     continue
 
                 num_external_computed_tokens = 0
@@ -668,7 +668,7 @@ class Scheduler(SchedulerInterface):
                             # the KVConnector couldn't determine
                             # the number of matched tokens.
                             self.waiting.pop_request()
-                            skipped_waiting_requests.prepend_request(request)
+                            skipped_waiting_requests.add_request(request)
                             continue
 
                     # Total computed tokens (local + external).
@@ -705,7 +705,7 @@ class Scheduler(SchedulerInterface):
                     if not self.scheduler_config.chunked_prefill_enabled and \
                         num_new_tokens > token_budget:
                         self.waiting.pop_request()
-                        skipped_waiting_requests.prepend_request(request)
+                        skipped_waiting_requests.add_request(request)
                         continue
 
                     num_new_tokens = min(num_new_tokens, token_budget)
@@ -778,7 +778,7 @@ class Scheduler(SchedulerInterface):
                 if load_kv_async:
                     # If loading async, allocate memory and put request
                     # into the WAITING_FOR_REMOTE_KV state.
-                    skipped_waiting_requests.prepend_request(request)
+                    skipped_waiting_requests.add_request(request)
                     request.status = RequestStatus.WAITING_FOR_REMOTE_KVS
 
                     # Flow validation: log KV transfer initiation
