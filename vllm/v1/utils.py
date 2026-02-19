@@ -76,13 +76,14 @@ _FRONTIER_RUNTIME_POSITIONS_META: contextvars.ContextVar[
 
 
 class FrontierCudaEventOpLogger:
-    """Collect per-op CUDA event timing for Frontier comparison."""
+    """Collect per-op timing for Frontier comparison."""
 
     def __init__(self,
                  log_path: str,
                  scopes: Optional[Sequence[str]] = None,
                  meta_enabled: bool = False,
-                 scope_mode: str = "default") -> None:
+                 scope_mode: str = "default",
+                 timing_mode: str = "record_function") -> None:
         if not log_path:
             raise ValueError("Frontier CUDA event log path is required.")
         log_dir = os.path.dirname(log_path)
@@ -97,9 +98,17 @@ class FrontierCudaEventOpLogger:
         self._scopes = set(scopes or DEFAULT_FRONTIER_CUDA_EVENT_OP_SCOPES)
         if not self._scopes:
             raise ValueError("Frontier CUDA event scope list is empty.")
+        timing_mode = timing_mode.strip().lower()
+        if timing_mode not in {"cuda_event", "record_function"}:
+            raise ValueError(
+                "VLLM_FRONTIER_OP_TIMING_MODE must be one of "
+                "['cuda_event', 'record_function']."
+            )
+        self._timing_mode = timing_mode
         self._pending_events: list[tuple[str, torch.cuda.Event,
                                          torch.cuda.Event]] = []
         self._pending_meta: dict[str, dict[str, Any]] = {}
+        self._profiler: Optional[torch.profiler.profile] = None
         self._meta_enabled = meta_enabled
         scope_mode = scope_mode.strip().lower()
         if scope_mode not in {"default", "kernel_only"}:
@@ -140,12 +149,20 @@ class FrontierCudaEventOpLogger:
             "batch_num_tokens": batch_num_tokens,
             "batch_num_prefill_tokens": batch_num_prefill_tokens,
             "batch_num_decode_tokens": batch_num_decode_tokens,
+            "timing_mode": self._timing_mode,
             "scope_mode": self._scope_mode,
         }
         if batch_request_num_tokens is not None:
             self._batch_meta["batch_request_num_tokens"] = batch_request_num_tokens
         self._pending_events = []
         self._pending_meta = {}
+        if self._timing_mode == "record_function":
+            self._profiler = torch.profiler.profile(
+                activities=[
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ])
+            self._profiler.__enter__()
 
     @contextlib.contextmanager
     def scope(self, op_name: str) -> Iterator[None]:
@@ -155,6 +172,11 @@ class FrontierCudaEventOpLogger:
         if op_name not in self._scopes:
             yield
             return
+        if self._timing_mode == "record_function":
+            with record_function(f"frontier_{op_name}"):
+                yield
+            return
+
         if self._scope_mode == "kernel_only":
             # Synchronize before timing to remove queued work from the scope.
             torch.cuda.synchronize()
@@ -189,22 +211,63 @@ class FrontierCudaEventOpLogger:
         if not self._batch_active:
             raise RuntimeError(
                 "Frontier CUDA event logger finish_batch without start_batch.")
-        if not self._pending_events:
+        aggregated: dict[str, dict[str, float]] = {}
+        if self._timing_mode == "record_function":
+            if self._profiler is None:
+                raise RuntimeError(
+                    "Frontier record_function profiler is not initialized.")
+            self._profiler.__exit__(None, None, None)
+            torch.cuda.synchronize()
+            for op_stat in self._profiler.key_averages():
+                op_name = str(op_stat.key)
+                if not op_name.startswith("frontier_"):
+                    continue
+                op_name = op_name[len("frontier_"):]
+                if op_name not in self._scopes:
+                    continue
+                if hasattr(op_stat, "cuda_time_total"):
+                    cuda_time_us = float(op_stat.cuda_time_total)
+                elif hasattr(op_stat, "device_time_total"):
+                    cuda_time_us = float(op_stat.device_time_total)
+                else:
+                    raise RuntimeError(
+                        "FunctionEventAvg is missing both cuda_time_total and "
+                        "device_time_total fields."
+                    )
+                if cuda_time_us <= 0:
+                    raise RuntimeError(
+                        f"Non-positive CUDA time for op {op_name}: {cuda_time_us}us")
+                count = int(op_stat.count)
+                if count <= 0:
+                    raise RuntimeError(
+                        f"Non-positive event count for op {op_name}: {count}")
+                stats = aggregated.setdefault(op_name, {
+                    "cuda_time_ms": 0.0,
+                    "count": 0.0
+                })
+                stats["cuda_time_ms"] += cuda_time_us / 1000.0
+                stats["count"] += float(count)
+            self._profiler = None
+        else:
+            if not self._pending_events:
+                raise RuntimeError(
+                    "Frontier CUDA event logger captured no operations.")
+            torch.cuda.synchronize()
+            for op_name, start_event, end_event in self._pending_events:
+                duration_ms = start_event.elapsed_time(end_event)
+                if duration_ms <= 0:
+                    raise RuntimeError(
+                        f"Non-positive CUDA time for op {op_name}: {duration_ms}")
+                stats = aggregated.setdefault(op_name, {
+                    "cuda_time_ms": 0.0,
+                    "count": 0.0
+                })
+                stats["cuda_time_ms"] += float(duration_ms)
+                stats["count"] += 1.0
+
+        if not aggregated:
             raise RuntimeError(
                 "Frontier CUDA event logger captured no operations.")
-        torch.cuda.synchronize()
-        aggregated: dict[str, dict[str, float]] = {}
-        for op_name, start_event, end_event in self._pending_events:
-            duration_ms = start_event.elapsed_time(end_event)
-            if duration_ms <= 0:
-                raise RuntimeError(
-                    f"Non-positive CUDA time for op {op_name}: {duration_ms}")
-            stats = aggregated.setdefault(op_name, {
-                "cuda_time_ms": 0.0,
-                "count": 0.0
-            })
-            stats["cuda_time_ms"] += float(duration_ms)
-            stats["count"] += 1.0
         timestamp = time.time()
         for op_name, stats in aggregated.items():
             meta = self._pending_meta.get(op_name)
