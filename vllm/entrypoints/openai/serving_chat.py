@@ -1081,6 +1081,8 @@ class OpenAIServingChat(OpenAIServing):
                     data = chunk.model_dump_json(exclude_unset=True)
                     yield f"data: {data}\n\n"
 
+                self._maybe_log_frontier_request_metrics(res)
+
             # once the final token is handled, if stream_options.include_usage
             # is sent, send the usage
             if include_usage:
@@ -1163,6 +1165,7 @@ class OpenAIServingChat(OpenAIServing):
             return self.create_error_response(str(e))
 
         assert final_res is not None
+        self._maybe_log_frontier_request_metrics(final_res)
 
         choices: list[ChatCompletionResponseChoice] = []
         if self.tool_call_id_type == 'kimi_k2':

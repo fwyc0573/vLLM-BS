@@ -8,8 +8,9 @@ import pytest
 import torch
 
 from vllm.attention import Attention
-from vllm.config import (CacheConfig, ModelConfig, ParallelConfig,
-                         SchedulerConfig, VllmConfig, set_current_vllm_config)
+from vllm.config import (CacheConfig, CUDAGraphMode, ModelConfig,
+                         ParallelConfig, SchedulerConfig, VllmConfig,
+                         set_current_vllm_config)
 from vllm.distributed.parallel_state import (init_distributed_environment,
                                              initialize_model_parallel)
 from vllm.model_executor.layers.mamba.mamba_mixer2 import MambaMixer2
@@ -24,7 +25,8 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec, KVCacheTensor)
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.worker.gpu_input_batch import InputBatch
-from vllm.v1.worker.gpu_model_runner import GPUModelRunner
+from vllm.v1.worker.gpu_model_runner import (
+    GPUModelRunner, _frontier_instrumentation_requires_enforce_eager)
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 10
@@ -841,3 +843,20 @@ def test_hybrid_attention_mamba_tensor_shapes(monkeypatch):
                                conv_blocks_constant)
             assert torch.equal(vllm_ctx[layer].kv_cache[0][1][blocks1, :],
                                ssm_blocks_constant)
+
+
+@pytest.mark.parametrize(
+    ("enforce_eager", "cudagraph_mode", "expected"),
+    [
+        (True, CUDAGraphMode.NONE, False),
+        (False, CUDAGraphMode.NONE, True),
+        (False, CUDAGraphMode.FULL_DECODE_ONLY, False),
+        (False, CUDAGraphMode.FULL_AND_PIECEWISE, True),
+    ],
+)
+def test_frontier_instrumentation_requires_enforce_eager(
+        enforce_eager, cudagraph_mode, expected):
+    assert _frontier_instrumentation_requires_enforce_eager(
+        enforce_eager=enforce_eager,
+        cudagraph_mode=cudagraph_mode,
+    ) is expected

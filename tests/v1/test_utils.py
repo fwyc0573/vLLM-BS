@@ -184,3 +184,63 @@ def check_request_balancing(server: RemoteOpenAIServer, dp_size: int):
     for count in engine_counts.values():
         assert count > total_requests // (dp_size + 1), (
             f"requests are imbalanced: {engine_counts}")
+
+
+from vllm.v1 import utils as v1_utils
+
+
+class _ForbiddenContextVar:
+
+    def get(self):
+        raise AssertionError("ContextVar.get should be skipped while compiling")
+
+    def set(self, value):
+        del value
+        raise AssertionError("ContextVar.set should be skipped while compiling")
+
+    def reset(self, token):
+        del token
+        raise AssertionError("ContextVar.reset should be skipped while compiling")
+
+
+def test_frontier_compile_safe_helpers_skip_contextvars(monkeypatch):
+    monkeypatch.setattr(v1_utils.frontier_trace, "is_active", lambda: True)
+    monkeypatch.setattr(v1_utils.torch.compiler, "is_compiling", lambda: True)
+    monkeypatch.setattr(v1_utils, "_FRONTIER_CUDA_EVENT_OP_LOGGER",
+                        _ForbiddenContextVar())
+    monkeypatch.setattr(v1_utils, "_FRONTIER_MOE_ROUTING_LOGGER",
+                        _ForbiddenContextVar())
+    monkeypatch.setattr(v1_utils, "_FRONTIER_MOE_ROUTING_CONTEXT",
+                        _ForbiddenContextVar())
+    monkeypatch.setattr(v1_utils, "_FRONTIER_RUNTIME_POSITIONS_META",
+                        _ForbiddenContextVar())
+
+    with v1_utils.record_function_or_nullcontext("tensor_parallel_allreduce"):
+        pass
+    with v1_utils.frontier_moe_routing_context(
+            layer_name="layers.0.mlp",
+            num_tokens=1,
+            router_topk=1,
+            global_num_experts=8,
+            local_num_experts=8,
+            ep_rank=0,
+            ep_size=1,
+            expert_map=None):
+        pass
+
+    assert not v1_utils.should_record_frontier_op_meta("attn_pre_proj")
+    v1_utils.record_frontier_op_meta("attn_pre_proj", {"num_tokens": 1})
+    v1_utils.set_frontier_positions_meta({"positions_shape": [1]})
+    assert v1_utils.get_frontier_positions_meta() is None
+    v1_utils.log_frontier_moe_routing_from_context(torch.tensor([[0]]))
+    v1_utils.log_frontier_moe_routing(
+        layer_name="layers.0.mlp",
+        topk_ids=torch.tensor([[0]]),
+        num_tokens=1,
+        router_topk=1,
+        global_num_experts=8,
+        local_num_experts=8,
+        ep_rank=0,
+        ep_size=1,
+        expert_map=None,
+    )

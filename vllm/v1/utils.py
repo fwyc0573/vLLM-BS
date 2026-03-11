@@ -75,6 +75,10 @@ _FRONTIER_RUNTIME_POSITIONS_META: contextvars.ContextVar[
 ] = contextvars.ContextVar("frontier_runtime_positions_meta", default=None)
 
 
+def _frontier_contextvars_enabled() -> bool:
+    return not torch.compiler.is_compiling()
+
+
 class FrontierCudaEventOpLogger:
     """Collect per-op timing for Frontier comparison."""
 
@@ -83,7 +87,8 @@ class FrontierCudaEventOpLogger:
                  scopes: Optional[Sequence[str]] = None,
                  meta_enabled: bool = False,
                  scope_mode: str = "default",
-                 timing_mode: str = "record_function") -> None:
+                 timing_mode: str = "record_function",
+                 allow_empty_pure_decode_batch: bool = False) -> None:
         if not log_path:
             raise ValueError("Frontier CUDA event log path is required.")
         log_dir = os.path.dirname(log_path)
@@ -117,6 +122,7 @@ class FrontierCudaEventOpLogger:
                 "['default', 'kernel_only']."
             )
         self._scope_mode = scope_mode
+        self._allow_empty_pure_decode_batch = allow_empty_pure_decode_batch
         self._batch_active = False
         self._batch_meta: dict[str, Any] = {}
 
@@ -212,6 +218,10 @@ class FrontierCudaEventOpLogger:
             raise RuntimeError(
                 "Frontier CUDA event logger finish_batch without start_batch.")
         aggregated: dict[str, dict[str, float]] = {}
+        allow_empty_batch = (
+            self._allow_empty_pure_decode_batch
+            and self._batch_meta.get("batch_num_prefill_tokens", 0) == 0
+            and self._batch_meta.get("batch_num_decode_tokens", 0) > 0)
         if self._timing_mode == "record_function":
             if self._profiler is None:
                 raise RuntimeError(
@@ -250,6 +260,12 @@ class FrontierCudaEventOpLogger:
             self._profiler = None
         else:
             if not self._pending_events:
+                if allow_empty_batch:
+                    torch.cuda.synchronize()
+                    self._batch_active = False
+                    self._pending_events = []
+                    self._pending_meta = {}
+                    return
                 raise RuntimeError(
                     "Frontier CUDA event logger captured no operations.")
             torch.cuda.synchronize()
@@ -266,6 +282,12 @@ class FrontierCudaEventOpLogger:
                 stats["count"] += 1.0
 
         if not aggregated:
+            if allow_empty_batch:
+                torch.cuda.synchronize()
+                self._batch_active = False
+                self._pending_events = []
+                self._pending_meta = {}
+                return
             raise RuntimeError(
                 "Frontier CUDA event logger captured no operations.")
         timestamp = time.time()
@@ -496,6 +518,10 @@ def frontier_moe_routing_context(
     ep_size: int,
     expert_map: Optional[torch.Tensor],
 ) -> Iterator[None]:
+    if not _frontier_contextvars_enabled():
+        yield
+        return
+
     logger = _FRONTIER_MOE_ROUTING_LOGGER.get()
     if logger is None:
         yield
@@ -548,6 +574,9 @@ def frontier_moe_routing_context(
 def log_frontier_moe_routing_from_context(
     topk_ids: torch.Tensor,
 ) -> None:
+    if not _frontier_contextvars_enabled():
+        return
+
     logger = _FRONTIER_MOE_ROUTING_LOGGER.get()
     if logger is None:
         return
@@ -916,6 +945,9 @@ def record_function_or_nullcontext(name: str) -> AbstractContextManager:
     else:
         profiler_ctx = contextlib.nullcontext()
 
+    if not _frontier_contextvars_enabled():
+        return profiler_ctx
+
     op_logger = _FRONTIER_CUDA_EVENT_OP_LOGGER.get()
     if (op_logger is None or not op_logger.should_record(name)
             or not frontier_trace.is_active()):
@@ -931,7 +963,7 @@ def record_function_or_nullcontext(name: str) -> AbstractContextManager:
 
 
 def record_frontier_op_meta(op_name: str, meta: dict[str, Any]) -> None:
-    if not frontier_trace.is_active():
+    if not _frontier_contextvars_enabled() or not frontier_trace.is_active():
         return
     op_logger = _FRONTIER_CUDA_EVENT_OP_LOGGER.get()
     if op_logger is None or not op_logger.should_record(op_name):
@@ -940,19 +972,21 @@ def record_frontier_op_meta(op_name: str, meta: dict[str, Any]) -> None:
 
 
 def should_record_frontier_op_meta(op_name: str) -> bool:
-    if not frontier_trace.is_active():
+    if not _frontier_contextvars_enabled() or not frontier_trace.is_active():
         return False
     op_logger = _FRONTIER_CUDA_EVENT_OP_LOGGER.get()
     return op_logger is not None and op_logger.should_record(op_name)
 
 
 def set_frontier_positions_meta(meta: dict[str, Any]) -> None:
-    if not frontier_trace.is_active():
+    if not _frontier_contextvars_enabled() or not frontier_trace.is_active():
         return
     _FRONTIER_RUNTIME_POSITIONS_META.set(meta)
 
 
 def get_frontier_positions_meta() -> Optional[dict[str, Any]]:
+    if not _frontier_contextvars_enabled():
+        return None
     return _FRONTIER_RUNTIME_POSITIONS_META.get()
 
 
@@ -968,7 +1002,7 @@ def log_frontier_moe_routing(
     ep_size: int,
     expert_map: Optional[torch.Tensor],
 ) -> None:
-    if not frontier_trace.is_active():
+    if not _frontier_contextvars_enabled() or not frontier_trace.is_active():
         return
     logger = _FRONTIER_MOE_ROUTING_LOGGER.get()
     if logger is None:

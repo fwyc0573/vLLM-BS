@@ -23,6 +23,7 @@ class FrontierRequestMetrics:
     request_e2e_time: float = 0.0  # End-to-end latency in ms
     ttft: float = 0.0  # Time to first token in ms
     tpot: float = 0.0  # Time per output token in ms
+    decode_first_token_latency: float = 0.0  # First pure decode token latency in ms
     request_model_execution_time: float = 0.0  # Pure forward pass time in ms
     request_num_prefill_tokens: int = 0
     request_num_decode_tokens: int = 0
@@ -84,6 +85,7 @@ class RequestStateStats:
     queued_ts: float = 0.0
     scheduled_ts: float = 0.0
     first_token_ts: float = 0.0
+    first_decode_token_ts: float = 0.0
     last_token_ts: float = 0.0
 
     # first token latency
@@ -150,6 +152,8 @@ class IterationStats:
         if is_prefilling:
             req_stats.first_token_ts = engine_core_timestamp
         else:
+            if req_stats.first_decode_token_ts == 0.0:
+                req_stats.first_decode_token_ts = engine_core_timestamp
             itl = engine_core_timestamp - req_stats.last_token_ts
             self.inter_token_latencies_iter.append(itl)
 

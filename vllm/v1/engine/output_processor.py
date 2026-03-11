@@ -278,6 +278,18 @@ class RequestState:
                 self.stats.last_token_ts - self.stats.first_token_ts, 0.0)
             tpot_ms = (decode_span_s / (decode_tokens - 1)) * 1000.0
 
+        if decode_tokens <= 1:
+            decode_first_token_latency_ms = 0.0
+        else:
+            assert self.stats.first_decode_token_ts > 0.0, (
+                "first_decode_token_ts must be recorded for finished "
+                "requests with pure decode steps"
+            )
+            decode_first_token_latency_ms = max(
+                self.stats.first_decode_token_ts - self.stats.first_token_ts,
+                0.0,
+            ) * 1000.0
+
         if self.stats.scheduled_ts > 0.0:
             model_exec_time_ms = max(
                 self.stats.last_token_ts - self.stats.scheduled_ts,
@@ -291,6 +303,7 @@ class RequestState:
             request_e2e_time=request_e2e_time_ms,
             ttft=ttft_ms,
             tpot=tpot_ms,
+            decode_first_token_latency=decode_first_token_latency_ms,
             request_model_execution_time=model_exec_time_ms,
             request_num_prefill_tokens=self.prompt_len,
             request_num_decode_tokens=decode_tokens,

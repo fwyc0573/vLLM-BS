@@ -171,3 +171,31 @@ def test_invalid_timing_mode_raises(tmp_path):
             scopes=["attn_prefill"],
             timing_mode="invalid_mode",
         )
+
+
+
+def test_cuda_event_mode_allows_empty_pure_decode_batch(tmp_path, monkeypatch):
+    log_path = tmp_path / "frontier_cuda_event_empty_decode.jsonl"
+    sync_calls = []
+
+    monkeypatch.setattr("torch.cuda.synchronize", lambda: sync_calls.append(True))
+    monkeypatch.setattr("torch.cuda.Event", _FakeCudaEvent)
+
+    logger = FrontierCudaEventOpLogger(
+        str(log_path),
+        scopes=["attn_decode"],
+        timing_mode="cuda_event",
+        allow_empty_pure_decode_batch=True,
+    )
+
+    logger.start_batch(
+        batch_id=3,
+        batch_size=2,
+        batch_num_tokens=2,
+        batch_num_prefill_tokens=0,
+        batch_num_decode_tokens=2,
+    )
+    logger.finish_batch()
+
+    assert sync_calls == [True]
+    assert log_path.read_text(encoding="utf-8") == ""

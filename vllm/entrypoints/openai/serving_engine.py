@@ -34,6 +34,8 @@ from vllm.entrypoints.chat_utils import (ChatCompletionMessageParam,
                                          resolve_chat_template_content_format)
 from vllm.entrypoints.context import ConversationContext
 from vllm.entrypoints.logger import RequestLogger
+from vllm.entrypoints.openai.frontier_request_metrics import (
+    FrontierRequestMetricsJSONLLogger)
 from vllm.entrypoints.openai.protocol import (ChatCompletionRequest,
                                               ChatCompletionResponse,
                                               ClassificationRequest,
@@ -238,6 +240,8 @@ class OpenAIServing:
         self._async_tokenizer_pool: dict[AnyTokenizer,
                                          AsyncMicrobatchTokenizer] = {}
         self.log_error_stack = log_error_stack
+        self.frontier_request_metrics_logger = (
+            FrontierRequestMetricsJSONLLogger.from_env())
 
     def _get_renderer(self, tokenizer: Optional[AnyTokenizer]) -> BaseRenderer:
         """
@@ -462,6 +466,18 @@ class OpenAIServing:
                                        err_type=err_type,
                                        status_code=status_code).model_dump())
         return json_str
+
+    def _maybe_log_frontier_request_metrics(self,
+                                            request_output: RequestOutput
+                                            ) -> None:
+        if self.frontier_request_metrics_logger is None:
+            return
+        self.frontier_request_metrics_logger.log(request_output)
+
+    def _maybe_log_frontier_request_metrics_batch(
+            self, request_outputs: Sequence[RequestOutput]) -> None:
+        for request_output in request_outputs:
+            self._maybe_log_frontier_request_metrics(request_output)
 
     async def _check_model(
         self,

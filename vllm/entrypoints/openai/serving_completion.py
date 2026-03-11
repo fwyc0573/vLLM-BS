@@ -456,6 +456,8 @@ class OpenAIServingCompletion(OpenAIServing):
                     response_json = chunk.model_dump_json(exclude_unset=False)
                     yield f"data: {response_json}\n\n"
 
+                self._maybe_log_frontier_request_metrics(res)
+
             total_prompt_tokens = sum(num_prompt_tokens)
             total_completion_tokens = sum(previous_num_tokens)
             final_usage_info = UsageInfo(
@@ -499,6 +501,8 @@ class OpenAIServingCompletion(OpenAIServing):
         tokenizer: AnyTokenizer,
         request_metadata: RequestResponseMetadata,
     ) -> CompletionResponse:
+        self._maybe_log_frontier_request_metrics_batch(final_res_batch)
+
         choices: list[CompletionResponseChoice] = []
         num_prompt_tokens = 0
         num_generated_tokens = 0

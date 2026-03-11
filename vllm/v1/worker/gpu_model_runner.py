@@ -138,6 +138,15 @@ else:
 logger = init_logger(__name__)
 
 
+def _frontier_instrumentation_requires_enforce_eager(
+    *,
+    enforce_eager: bool,
+    cudagraph_mode: CUDAGraphMode,
+) -> bool:
+    return (not enforce_eager
+            and cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY)
+
+
 # Wrapper for ModelRunnerOutput to support overlapped execution.
 class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
 
@@ -446,17 +455,23 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             raise RuntimeError(
                 "VLLM_FRONTIER_RUNTIME_META_ENABLED requires "
                 "VLLM_FRONTIER_CUDA_EVENT_OP_LOG_PATH")
-        if FRONTIER_CUDA_EVENT_OP_LOG_ENABLED and not self.model_config.enforce_eager:
+        if FRONTIER_CUDA_EVENT_OP_LOG_ENABLED                 and _frontier_instrumentation_requires_enforce_eager(
+                    enforce_eager=self.model_config.enforce_eager,
+                    cudagraph_mode=self.compilation_config.cudagraph_mode):
             raise RuntimeError(
-                "Frontier CUDA event per-op logging requires --enforce-eager.")
+                "Frontier CUDA event per-op logging requires --enforce-eager "
+                "or cudagraph_mode=FULL_DECODE_ONLY.")
         if (FRONTIER_MOE_ROUTING_LOG_PATH
                 and not FRONTIER_INSTRUMENTATION_ENABLED):
             raise RuntimeError(
                 "VLLM_FRONTIER_MOE_ROUTING_LOG_PATH requires "
                 "VLLM_FRONTIER_INSTRUMENTATION=1")
-        if FRONTIER_MOE_ROUTING_LOG_ENABLED and not self.model_config.enforce_eager:
+        if FRONTIER_MOE_ROUTING_LOG_ENABLED                 and _frontier_instrumentation_requires_enforce_eager(
+                    enforce_eager=self.model_config.enforce_eager,
+                    cudagraph_mode=self.compilation_config.cudagraph_mode):
             raise RuntimeError(
-                "Frontier MoE routing logging requires --enforce-eager.")
+                "Frontier MoE routing logging requires --enforce-eager "
+                "or cudagraph_mode=FULL_DECODE_ONLY.")
         if FRONTIER_INSTRUMENTATION_ENABLED:
             self._frontier_forward_start_event = torch.cuda.Event(
                 enable_timing=True)
@@ -497,6 +512,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     meta_enabled=FRONTIER_RUNTIME_META_ENABLED,
                     scope_mode=FRONTIER_CUDA_EVENT_SCOPE_MODE,
                     timing_mode=FRONTIER_OP_TIMING_MODE,
+                    allow_empty_pure_decode_batch=(
+                        self.compilation_config.cudagraph_mode
+                        == CUDAGraphMode.FULL_DECODE_ONLY),
                 )
                 logger.info(
                     "Frontier per-op logging enabled (timing_mode=%s)",
