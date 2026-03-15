@@ -79,6 +79,98 @@ def _frontier_contextvars_enabled() -> bool:
     return not torch.compiler.is_compiling()
 
 
+def _frontier_find_child_events(trace_events: list[dict[str, Any]],
+                                parent_event: dict[str, Any]) -> list[dict[str, Any]]:
+    if "dur" not in parent_event or "ts" not in parent_event:
+        return []
+
+    children: list[dict[str, Any]] = []
+    parent_start = parent_event["ts"]
+    parent_end = parent_start + parent_event["dur"]
+    for event in trace_events:
+        if event is parent_event:
+            continue
+        if "dur" not in event or "ts" not in event:
+            continue
+        event_start = event["ts"]
+        event_end = event_start + event["dur"]
+        if event_start > parent_start and event_end < parent_end:
+            children.append(event)
+    return children
+
+
+def _frontier_find_correlated_trace_event(
+    trace_events: list[dict[str, Any]],
+    trace_event: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    correlation = trace_event.get("args", {}).get("correlation")
+    if correlation is None:
+        return None
+    for event in trace_events:
+        if event is trace_event:
+            continue
+        if event.get("args", {}).get("correlation") == correlation:
+            return event
+    return None
+
+
+def _frontier_build_record_function_trace_path(log_path: str, batch_id: int) -> str:
+    log_dir = os.path.dirname(log_path)
+    trace_dir = os.path.join(log_dir or ".", "frontier_profiler_traces")
+    os.makedirs(trace_dir, exist_ok=True)
+    return os.path.join(
+        trace_dir,
+        f"frontier_batch_{batch_id}_{os.getpid()}_{time.time_ns()}.json",
+    )
+
+
+def _frontier_aggregate_record_function_trace(
+    trace_path: str,
+    scopes: set[str],
+    allow_zero_cuda_ops: Optional[set[str]] = None,
+) -> dict[str, dict[str, float]]:
+    with open(trace_path, encoding="utf-8") as trace_file:
+        trace_events = json.load(trace_file).get("traceEvents", [])
+
+    aggregated: dict[str, dict[str, float]] = {}
+    allow_zero_cuda_ops = set(allow_zero_cuda_ops or set())
+    for event in trace_events:
+        if event.get("cat") != "user_annotation":
+            continue
+        raw_name = event.get("name", "")
+        if not isinstance(raw_name, str) or not raw_name.startswith("frontier_"):
+            continue
+        op_name = raw_name[len("frontier_"):]
+        if op_name not in scopes:
+            continue
+
+        cuda_time_us = 0.0
+        for child in _frontier_find_child_events(trace_events, event):
+            if child.get("cat") not in ("cuda_runtime", "cuda_driver"):
+                continue
+            correlated_event = _frontier_find_correlated_trace_event(trace_events, child)
+            if correlated_event is None:
+                continue
+            duration_us = correlated_event.get("dur")
+            if duration_us is None:
+                continue
+            cuda_time_us += float(duration_us)
+
+        stats = aggregated.setdefault(op_name, {
+            "cuda_time_ms": 0.0,
+            "count": 0.0,
+        })
+        stats["cuda_time_ms"] += cuda_time_us / 1000.0
+        stats["count"] += 1.0
+
+    for op_name, stats in aggregated.items():
+        if stats["cuda_time_ms"] <= 0.0 and op_name not in allow_zero_cuda_ops:
+            raise RuntimeError(
+                f"Non-positive CUDA time for op {op_name}: {stats['cuda_time_ms'] * 1000.0}us")
+
+    return aggregated
+
+
 class FrontierCudaEventOpLogger:
     """Collect per-op timing for Frontier comparison."""
 
@@ -94,6 +186,7 @@ class FrontierCudaEventOpLogger:
         log_dir = os.path.dirname(log_path)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
+        self._log_path = log_path
         try:
             self._log_file = open(log_path, "a", encoding="utf-8")
         except OSError as exc:
@@ -228,35 +321,15 @@ class FrontierCudaEventOpLogger:
                     "Frontier record_function profiler is not initialized.")
             self._profiler.__exit__(None, None, None)
             torch.cuda.synchronize()
-            for op_stat in self._profiler.key_averages():
-                op_name = str(op_stat.key)
-                if not op_name.startswith("frontier_"):
-                    continue
-                op_name = op_name[len("frontier_"):]
-                if op_name not in self._scopes:
-                    continue
-                if hasattr(op_stat, "cuda_time_total"):
-                    cuda_time_us = float(op_stat.cuda_time_total)
-                elif hasattr(op_stat, "device_time_total"):
-                    cuda_time_us = float(op_stat.device_time_total)
-                else:
-                    raise RuntimeError(
-                        "FunctionEventAvg is missing both cuda_time_total and "
-                        "device_time_total fields."
-                    )
-                if cuda_time_us <= 0:
-                    raise RuntimeError(
-                        f"Non-positive CUDA time for op {op_name}: {cuda_time_us}us")
-                count = int(op_stat.count)
-                if count <= 0:
-                    raise RuntimeError(
-                        f"Non-positive event count for op {op_name}: {count}")
-                stats = aggregated.setdefault(op_name, {
-                    "cuda_time_ms": 0.0,
-                    "count": 0.0
-                })
-                stats["cuda_time_ms"] += cuda_time_us / 1000.0
-                stats["count"] += float(count)
+            trace_path = _frontier_build_record_function_trace_path(
+                self._log_path, int(self._batch_meta.get("batch_id", -1)))
+            self._profiler.export_chrome_trace(trace_path)
+            allow_zero_cuda_ops: set[str] = set()
+            if (self._batch_meta.get("batch_num_prefill_tokens", 0) == 0
+                    and self._batch_meta.get("batch_num_decode_tokens", 0) > 0):
+                allow_zero_cuda_ops.add("attn_kv_cache_save")
+            aggregated = _frontier_aggregate_record_function_trace(
+                trace_path, self._scopes, allow_zero_cuda_ops=allow_zero_cuda_ops)
             self._profiler = None
         else:
             if not self._pending_events:
@@ -433,10 +506,16 @@ class FrontierMoeRoutingLogger:
                 )
             local_ids = expert_map_cpu[flat_ids]
             local_ids = local_ids[local_ids >= 0]
+            expected_total_routed = int(local_ids.numel())
             counts_tensor = torch.bincount(
                 local_ids, minlength=num_experts_per_device
             )
             total_routed_tokens = int(counts_tensor.sum().item())
+            if total_routed_tokens != expected_total_routed:
+                raise RuntimeError(
+                    f"MoE routing local token mismatch: total_routed_tokens={total_routed_tokens}, "
+                    f"expected_local={expected_total_routed}"
+                )
             counts = counts_tensor.tolist()
 
         if len(counts) != num_experts_per_device:
@@ -444,26 +523,37 @@ class FrontierMoeRoutingLogger:
                 f"MoE routing counts length mismatch: "
                 f"{len(counts)} vs {num_experts_per_device}"
             )
-        if total_routed_tokens <= 0:
+        if total_routed_tokens < 0:
             raise RuntimeError(
                 f"MoE routing total_routed_tokens invalid: {total_routed_tokens}"
             )
 
-        mean = total_routed_tokens / num_experts_per_device
-        variance = sum((c - mean) ** 2 for c in counts) / num_experts_per_device
-        std = math.sqrt(variance)
-        load_imbalance_cv = std / mean if mean > 0 else 0.0
-        min_load_ratio = min(counts) / mean if mean > 0 else 0.0
-        max_load_ratio = max(counts) / mean if mean > 0 else 0.0
-        expert_utilization = sum(1 for c in counts if c > 0) / num_experts_per_device
-        probs = [c / total_routed_tokens for c in counts if c > 0]
-        load_entropy = -sum(p * math.log2(p) for p in probs) if probs else 0.0
-        sorted_counts = sorted(counts)
-        gini = (
-            (2 * sum((i + 1) * x for i, x in enumerate(sorted_counts)))
-            / (num_experts_per_device * total_routed_tokens)
-            - (num_experts_per_device + 1) / num_experts_per_device
-        )
+        if total_routed_tokens == 0:
+            mean = 0.0
+            variance = 0.0
+            std = 0.0
+            load_imbalance_cv = 0.0
+            min_load_ratio = 0.0
+            max_load_ratio = 0.0
+            expert_utilization = 0.0
+            load_entropy = 0.0
+            gini = 0.0
+        else:
+            mean = total_routed_tokens / num_experts_per_device
+            variance = sum((c - mean) ** 2 for c in counts) / num_experts_per_device
+            std = math.sqrt(variance)
+            load_imbalance_cv = std / mean if mean > 0 else 0.0
+            min_load_ratio = min(counts) / mean if mean > 0 else 0.0
+            max_load_ratio = max(counts) / mean if mean > 0 else 0.0
+            expert_utilization = sum(1 for c in counts if c > 0) / num_experts_per_device
+            probs = [c / total_routed_tokens for c in counts if c > 0]
+            load_entropy = -sum(p * math.log2(p) for p in probs) if probs else 0.0
+            sorted_counts = sorted(counts)
+            gini = (
+                (2 * sum((i + 1) * x for i, x in enumerate(sorted_counts)))
+                / (num_experts_per_device * total_routed_tokens)
+                - (num_experts_per_device + 1) / num_experts_per_device
+            )
 
         record = {
             **self._batch_meta,

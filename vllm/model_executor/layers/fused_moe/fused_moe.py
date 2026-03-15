@@ -1718,79 +1718,80 @@ def fused_experts_impl(
                                          global_num_experts, expert_map))
 
             with record_function_or_nullcontext("moe_grouped_gemm"):
-                invoke_fused_moe_kernel(qcurr_hidden_states,
-                                        w1,
-                                        intermediate_cache1,
-                                        a1q_scale,
-                                        w1_scale,
-                                        w1_zp,
-                                        curr_topk_weights,
-                                        sorted_token_ids,
-                                        expert_ids,
-                                        num_tokens_post_padded,
-                                        apply_router_weight_on_input,
-                                        top_k_num,
-                                        config,
-                                        compute_type=compute_type,
-                                        use_fp8_w8a8=use_fp8_w8a8,
-                                        use_int8_w8a8=use_int8_w8a8,
-                                        use_int8_w8a16=use_int8_w8a16,
-                                        use_int4_w4a16=use_int4_w4a16,
-                                        per_channel_quant=per_channel_quant,
-                                        block_shape=block_shape,
-                                        B_bias=w1_bias)
+                with record_function_or_nullcontext("moe_grouped_gemm_w1"):
+                    invoke_fused_moe_kernel(qcurr_hidden_states,
+                                            w1,
+                                            intermediate_cache1,
+                                            a1q_scale,
+                                            w1_scale,
+                                            w1_zp,
+                                            curr_topk_weights,
+                                            sorted_token_ids,
+                                            expert_ids,
+                                            num_tokens_post_padded,
+                                            apply_router_weight_on_input,
+                                            top_k_num,
+                                            config,
+                                            compute_type=compute_type,
+                                            use_fp8_w8a8=use_fp8_w8a8,
+                                            use_int8_w8a8=use_int8_w8a8,
+                                            use_int8_w8a16=use_int8_w8a16,
+                                            use_int4_w4a16=use_int4_w4a16,
+                                            per_channel_quant=per_channel_quant,
+                                            block_shape=block_shape,
+                                            B_bias=w1_bias)
 
-            # Activation function with multiplication
-            if activation == "silu" and is_act_and_mul:
-                torch.ops._C.silu_and_mul(intermediate_cache2,
-                                          intermediate_cache1.view(-1, N))
-            elif activation == "gelu" and is_act_and_mul:
-                torch.ops._C.gelu_and_mul(intermediate_cache2,
-                                          intermediate_cache1.view(-1, N))
-            elif activation == "swigluoai" and is_act_and_mul:
-                # alpha = 1.702, limit = 7.0
-                torch.ops._C.swigluoai_and_mul(intermediate_cache2,
-                                               intermediate_cache1.view(-1, N))
-            # Activation function without multiplication
-            elif activation == "silu":
-                intermediate_cache2 = F.silu(intermediate_cache1.view(-1, N))
-            elif activation == "gelu":
-                intermediate_cache2 = F.gelu(intermediate_cache1.view(-1, N))
+                # Activation function with multiplication
+                if activation == "silu" and is_act_and_mul:
+                    torch.ops._C.silu_and_mul(intermediate_cache2,
+                                              intermediate_cache1.view(-1, N))
+                elif activation == "gelu" and is_act_and_mul:
+                    torch.ops._C.gelu_and_mul(intermediate_cache2,
+                                              intermediate_cache1.view(-1, N))
+                elif activation == "swigluoai" and is_act_and_mul:
+                    # alpha = 1.702, limit = 7.0
+                    torch.ops._C.swigluoai_and_mul(intermediate_cache2,
+                                                   intermediate_cache1.view(-1, N))
+                # Activation function without multiplication
+                elif activation == "silu":
+                    intermediate_cache2 = F.silu(intermediate_cache1.view(-1, N))
+                elif activation == "gelu":
+                    intermediate_cache2 = F.gelu(intermediate_cache1.view(-1, N))
 
-            else:
-                raise ValueError(
-                    f"Unsupported FusedMoe activation: {activation}, "
-                    f"with is_act_and_mul={is_act_and_mul}.")
+                else:
+                    raise ValueError(
+                        f"Unsupported FusedMoe activation: {activation}, "
+                        f"with is_act_and_mul={is_act_and_mul}.")
 
-            qintermediate_cache2, a2q_scale = moe_kernel_quantize_input(
-                A=intermediate_cache2,
-                A_scale=a2_scale,
-                quant_dtype=qtype,
-                per_act_token_quant=per_channel_quant,
-                block_shape=block_shape)
+                qintermediate_cache2, a2q_scale = moe_kernel_quantize_input(
+                    A=intermediate_cache2,
+                    A_scale=a2_scale,
+                    quant_dtype=qtype,
+                    per_act_token_quant=per_channel_quant,
+                    block_shape=block_shape)
 
-            with record_function_or_nullcontext("moe_grouped_gemm"):
-                invoke_fused_moe_kernel(qintermediate_cache2,
-                                        w2,
-                                        intermediate_cache3,
-                                        a2q_scale,
-                                        w2_scale,
-                                        w2_zp,
-                                        curr_topk_weights,
-                                        sorted_token_ids,
-                                        expert_ids,
-                                        num_tokens_post_padded,
-                                        not apply_router_weight_on_input,
-                                        1,
-                                        config,
-                                        compute_type=compute_type,
-                                        use_fp8_w8a8=use_fp8_w8a8,
-                                        use_int8_w8a8=use_int8_w8a8,
-                                        use_int8_w8a16=use_int8_w8a16,
-                                        use_int4_w4a16=use_int4_w4a16,
-                                        per_channel_quant=per_channel_quant,
-                                        block_shape=block_shape,
-                                        B_bias=w2_bias)
+                with record_function_or_nullcontext("moe_grouped_gemm_w2"):
+                    invoke_fused_moe_kernel(qintermediate_cache2,
+                                            w2,
+                                            intermediate_cache3,
+                                            a2q_scale,
+                                            w2_scale,
+                                            w2_zp,
+                                            curr_topk_weights,
+                                            sorted_token_ids,
+                                            expert_ids,
+                                            num_tokens_post_padded,
+                                            not apply_router_weight_on_input,
+                                            1,
+                                            config,
+                                            compute_type=compute_type,
+                                            use_fp8_w8a8=use_fp8_w8a8,
+                                            use_int8_w8a8=use_int8_w8a8,
+                                            use_int8_w8a16=use_int8_w8a16,
+                                            use_int4_w4a16=use_int4_w4a16,
+                                            per_channel_quant=per_channel_quant,
+                                            block_shape=block_shape,
+                                            B_bias=w2_bias)
 
             ops.moe_sum(intermediate_cache3.view(*intermediate_cache3.size()),
                         out_hidden_states[begin_chunk_idx:end_chunk_idx])
@@ -2078,61 +2079,62 @@ class TritonExperts(mk.FusedMoEPermuteExpertsUnpermute):
                                          global_num_experts, expert_map))
 
             with record_function_or_nullcontext("moe_grouped_gemm"):
-                invoke_fused_moe_kernel(
-                    hidden_states,
-                    w1,
-                    intermediate_cache1,
-                    a1q_scale,
-                    w1_scale,
-                    w1_zp,
-                    None,  # topk_weights
-                    sorted_token_ids,
-                    expert_ids,
-                    num_tokens_post_padded,
-                    False,  # mul_routed_weights
-                    top_k_num,
-                    config,
-                    compute_type=compute_type,
-                    use_fp8_w8a8=self.use_fp8_w8a8,
-                    use_int8_w8a8=self.use_int8_w8a8,
-                    use_int8_w8a16=self.use_int8_w8a16,
-                    use_int4_w4a16=self.use_int4_w4a16,
-                    per_channel_quant=self.per_act_token_quant,
-                    block_shape=self.block_shape,
-                    B_bias=None  # TODO support B_bias
-                )
+                with record_function_or_nullcontext("moe_grouped_gemm_w1"):
+                    invoke_fused_moe_kernel(
+                        hidden_states,
+                        w1,
+                        intermediate_cache1,
+                        a1q_scale,
+                        w1_scale,
+                        w1_zp,
+                        None,  # topk_weights
+                        sorted_token_ids,
+                        expert_ids,
+                        num_tokens_post_padded,
+                        False,  # mul_routed_weights
+                        top_k_num,
+                        config,
+                        compute_type=compute_type,
+                        use_fp8_w8a8=self.use_fp8_w8a8,
+                        use_int8_w8a8=self.use_int8_w8a8,
+                        use_int8_w8a16=self.use_int8_w8a16,
+                        use_int4_w4a16=self.use_int4_w4a16,
+                        per_channel_quant=self.per_act_token_quant,
+                        block_shape=self.block_shape,
+                        B_bias=None  # TODO support B_bias
+                    )
 
-            self.activation(activation, intermediate_cache2,
-                            intermediate_cache1.view(-1, N))
+                self.activation(activation, intermediate_cache2,
+                                intermediate_cache1.view(-1, N))
 
-            a2q_scale: Optional[torch.Tensor] = None
+                a2q_scale: Optional[torch.Tensor] = None
 
-            qintermediate_cache2, a2q_scale = moe_kernel_quantize_input(
-                intermediate_cache2, a2_scale, self.quant_dtype,
-                self.per_act_token_quant, self.block_shape)
+                qintermediate_cache2, a2q_scale = moe_kernel_quantize_input(
+                    intermediate_cache2, a2_scale, self.quant_dtype,
+                    self.per_act_token_quant, self.block_shape)
 
-            with record_function_or_nullcontext("moe_grouped_gemm"):
-                invoke_fused_moe_kernel(
-                    qintermediate_cache2,
-                    w2,
-                    intermediate_cache3,
-                    a2q_scale,
-                    w2_scale,
-                    w2_zp,
-                    topk_weights,
-                    sorted_token_ids,
-                    expert_ids,
-                    num_tokens_post_padded,
-                    not apply_router_weight_on_input,
-                    1,
-                    config,
-                    compute_type=compute_type,
-                    use_fp8_w8a8=self.use_fp8_w8a8,
-                    use_int8_w8a8=self.use_int8_w8a8,
-                    use_int8_w8a16=self.use_int8_w8a16,
-                    use_int4_w4a16=self.use_int4_w4a16,
-                    per_channel_quant=self.per_act_token_quant,
-                    block_shape=self.block_shape,
+                with record_function_or_nullcontext("moe_grouped_gemm_w2"):
+                    invoke_fused_moe_kernel(
+                        qintermediate_cache2,
+                        w2,
+                        intermediate_cache3,
+                        a2q_scale,
+                        w2_scale,
+                        w2_zp,
+                        topk_weights,
+                        sorted_token_ids,
+                        expert_ids,
+                        num_tokens_post_padded,
+                        not apply_router_weight_on_input,
+                        1,
+                        config,
+                        compute_type=compute_type,
+                        use_fp8_w8a8=self.use_fp8_w8a8,
+                        use_int8_w8a8=self.use_int8_w8a8,
+                        use_int8_w8a16=self.use_int8_w8a16,
+                        use_int4_w4a16=self.use_int4_w4a16,
+                        per_channel_quant=self.per_act_token_quant,
+                        block_shape=self.block_shape,
                     B_bias=None  # TODO support B_bias
                 )
 

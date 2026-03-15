@@ -132,6 +132,45 @@ class _DummyMoELayer(torch.nn.Module):
         self.w2_weight = torch.zeros((1, 1, 1))
 
 
+def test_frontier_moe_routing_logger_uses_local_expected_total_when_expert_map_present(tmp_path):
+    log_path = tmp_path / "frontier_moe_routing_local_expected.jsonl"
+    logger = FrontierMoeRoutingLogger(str(log_path))
+
+    logger.start_batch(
+        batch_id=0,
+        batch_size=2,
+        batch_num_tokens=4,
+        batch_num_prefill_tokens=4,
+        batch_num_decode_tokens=0,
+    )
+
+    topk_ids = torch.tensor([[0, 1], [2, 3]], dtype=torch.int64)
+    expert_map = torch.tensor([0, -1, 1, -1], dtype=torch.int64)
+
+    with logger.activate():
+        log_frontier_moe_routing(
+            layer_name="layers.0.block_sparse_moe",
+            topk_ids=topk_ids,
+            num_tokens=2,
+            router_topk=2,
+            global_num_experts=4,
+            local_num_experts=2,
+            ep_rank=0,
+            ep_size=2,
+            expert_map=expert_map,
+        )
+
+    logger.finish_batch()
+
+    lines = log_path.read_text().strip().splitlines()
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+
+    assert record["num_experts_per_device"] == 2
+    assert record["total_routed_tokens"] == 2
+    assert record["expected_total_routed_tokens"] == 2
+    assert record["per_expert_tokens"] == {"0": 1, "1": 1}
+
 def test_fused_moe_forward_cuda_logs_routing(tmp_path):
     log_path = tmp_path / "frontier_moe_forward.jsonl"
     logger = FrontierMoeRoutingLogger(str(log_path))
