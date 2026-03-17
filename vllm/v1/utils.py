@@ -230,6 +230,12 @@ class FrontierCudaEventOpLogger:
     def should_record(self, op_name: str) -> bool:
         return op_name in self._scopes
 
+    def _requires_kernel_only_post_sync(self, op_name: str) -> bool:
+        return (
+            op_name.endswith("allreduce")
+            or "alltoall" in op_name
+        )
+
     def start_batch(
         self,
         batch_id: int,
@@ -285,6 +291,11 @@ class FrontierCudaEventOpLogger:
         try:
             yield
         finally:
+            if (
+                self._scope_mode == "kernel_only"
+                and self._requires_kernel_only_post_sync(op_name)
+            ):
+                torch.cuda.synchronize()
             end_event.record()
             self._pending_events.append((op_name, start_event, end_event))
 
