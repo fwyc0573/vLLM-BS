@@ -1607,11 +1607,10 @@ class FusedMoE(CustomOp):
         else:
             op_name = ("expert_parallel_allreduce"
                        if self.ep_size > 1 else "moe_tensor_parallel_allreduce")
-            with record_function_or_nullcontext(op_name):
-                return tensor_model_parallel_all_reduce(
-                    final_hidden_states,
-                    record_scope_name=None,
-                )
+            return tensor_model_parallel_all_reduce(
+                final_hidden_states,
+                record_scope_name=op_name,
+            )
 
     def forward_native(
         self,
