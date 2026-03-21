@@ -190,6 +190,7 @@ if TYPE_CHECKING:
     VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES: str = ""
     VLLM_FRONTIER_OP_TIMING_MODE: str = "record_function"
     VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE: str = "default"
+    VLLM_FRONTIER_OP_AGG_MODE: str = "per_scope"
     VLLM_FRONTIER_RUNTIME_META_ENABLED: bool = False
     VLLM_KV_EVENTS_USE_INT_BLOCK_HASHES: bool = True
 
@@ -1295,6 +1296,8 @@ environment_variables: dict[str, Callable[[], Any]] = {
     lambda: os.getenv("VLLM_FRONTIER_OP_TIMING_MODE", "record_function"),
     "VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE":
     lambda: os.getenv("VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE", "default"),
+    "VLLM_FRONTIER_OP_AGG_MODE":
+    lambda: os.getenv("VLLM_FRONTIER_OP_AGG_MODE", "per_scope"),
     "VLLM_FRONTIER_RUNTIME_META_ENABLED":
     lambda: bool(int(os.getenv("VLLM_FRONTIER_RUNTIME_META_ENABLED", "0"))),
 

@@ -27,6 +27,7 @@ FRONTIER_CUDA_EVENT_OP_SCOPES = os.environ.get(
     "VLLM_FRONTIER_CUDA_EVENT_OP_SCOPES", "")
 FRONTIER_OP_TIMING_MODE = envs.VLLM_FRONTIER_OP_TIMING_MODE
 FRONTIER_CUDA_EVENT_SCOPE_MODE = envs.VLLM_FRONTIER_CUDA_EVENT_SCOPE_MODE
+FRONTIER_OP_AGG_MODE = envs.VLLM_FRONTIER_OP_AGG_MODE
 FRONTIER_CUDA_EVENT_OP_LOG_ENABLED = (
     FRONTIER_INSTRUMENTATION_ENABLED
     and bool(FRONTIER_CUDA_EVENT_OP_LOG_PATH)
@@ -512,13 +513,15 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     meta_enabled=FRONTIER_RUNTIME_META_ENABLED,
                     scope_mode=FRONTIER_CUDA_EVENT_SCOPE_MODE,
                     timing_mode=FRONTIER_OP_TIMING_MODE,
+                    aggregation_mode=FRONTIER_OP_AGG_MODE,
                     allow_empty_pure_decode_batch=(
                         self.compilation_config.cudagraph_mode
                         == CUDAGraphMode.FULL_DECODE_ONLY),
                 )
                 logger.info(
-                    "Frontier per-op logging enabled (timing_mode=%s)",
+                    "Frontier per-op logging enabled (timing_mode=%s, aggregation_mode=%s)",
                     FRONTIER_OP_TIMING_MODE,
+                    FRONTIER_OP_AGG_MODE,
                 )
             if FRONTIER_MOE_ROUTING_LOG_ENABLED:
                 self._frontier_moe_routing_logger = FrontierMoeRoutingLogger(

@@ -129,10 +129,33 @@ def _frontier_aggregate_record_function_trace(
     scopes: set[str],
     allow_zero_cuda_ops: Optional[set[str]] = None,
 ) -> dict[str, dict[str, float]]:
+    scope_rows = _frontier_collect_record_function_scopes(
+        trace_path,
+        scopes,
+        allow_zero_cuda_ops=allow_zero_cuda_ops,
+    )
+    aggregated: dict[str, dict[str, float]] = {}
+    for row in scope_rows:
+        op_name = str(row["op_name"])
+        stats = aggregated.setdefault(op_name, {
+            "cuda_time_ms": 0.0,
+            "count": 0.0,
+        })
+        stats["cuda_time_ms"] += float(row["cuda_time_ms"])
+        stats["count"] += float(row["count"])
+    return aggregated
+
+
+def _frontier_collect_record_function_scopes(
+    trace_path: str,
+    scopes: set[str],
+    allow_zero_cuda_ops: Optional[set[str]] = None,
+) -> list[dict[str, float | int | str]]:
     with open(trace_path, encoding="utf-8") as trace_file:
         trace_events = json.load(trace_file).get("traceEvents", [])
 
-    aggregated: dict[str, dict[str, float]] = {}
+    scope_rows: list[dict[str, float | int | str]] = []
+    scope_seq_by_op: dict[str, int] = {}
     allow_zero_cuda_ops = set(allow_zero_cuda_ops or set())
     for event in trace_events:
         if event.get("cat") != "user_annotation":
@@ -156,19 +179,20 @@ def _frontier_aggregate_record_function_trace(
                 continue
             cuda_time_us += float(duration_us)
 
-        stats = aggregated.setdefault(op_name, {
-            "cuda_time_ms": 0.0,
-            "count": 0.0,
-        })
-        stats["cuda_time_ms"] += cuda_time_us / 1000.0
-        stats["count"] += 1.0
-
-    for op_name, stats in aggregated.items():
-        if stats["cuda_time_ms"] <= 0.0 and op_name not in allow_zero_cuda_ops:
+        cuda_time_ms = cuda_time_us / 1000.0
+        if cuda_time_ms <= 0.0 and op_name not in allow_zero_cuda_ops:
             raise RuntimeError(
-                f"Non-positive CUDA time for op {op_name}: {stats['cuda_time_ms'] * 1000.0}us")
+                f"Non-positive CUDA time for op {op_name}: {cuda_time_us}us")
+        scope_seq = scope_seq_by_op.get(op_name, 0)
+        scope_seq_by_op[op_name] = scope_seq + 1
+        scope_rows.append({
+            "op_name": op_name,
+            "cuda_time_ms": cuda_time_ms,
+            "count": 1,
+            "scope_seq": scope_seq,
+        })
 
-    return aggregated
+    return scope_rows
 
 
 class FrontierCudaEventOpLogger:
@@ -180,6 +204,7 @@ class FrontierCudaEventOpLogger:
                  meta_enabled: bool = False,
                  scope_mode: str = "default",
                  timing_mode: str = "record_function",
+                 aggregation_mode: str = "per_scope",
                  allow_empty_pure_decode_batch: bool = False) -> None:
         if not log_path:
             raise ValueError("Frontier CUDA event log path is required.")
@@ -203,9 +228,16 @@ class FrontierCudaEventOpLogger:
                 "['cuda_event', 'record_function']."
             )
         self._timing_mode = timing_mode
-        self._pending_events: list[tuple[str, torch.cuda.Event,
+        aggregation_mode = aggregation_mode.strip().lower()
+        if aggregation_mode not in {"per_scope", "batch_sum"}:
+            raise ValueError(
+                "VLLM_FRONTIER_OP_AGG_MODE must be one of "
+                "['per_scope', 'batch_sum']."
+            )
+        self._aggregation_mode = aggregation_mode
+        self._pending_events: list[tuple[str, int, torch.cuda.Event,
                                          torch.cuda.Event]] = []
-        self._pending_meta: dict[str, dict[str, Any]] = {}
+        self._pending_meta: dict[object, dict[str, Any]] = {}
         self._profiler: Optional[torch.profiler.profile] = None
         self._meta_enabled = meta_enabled
         scope_mode = scope_mode.strip().lower()
@@ -218,6 +250,8 @@ class FrontierCudaEventOpLogger:
         self._allow_empty_pure_decode_batch = allow_empty_pure_decode_batch
         self._batch_active = False
         self._batch_meta: dict[str, Any] = {}
+        self._scope_seq_by_op: dict[str, int] = {}
+        self._active_scope_keys: list[tuple[str, int]] = []
 
     @contextlib.contextmanager
     def activate(self) -> Iterator[None]:
@@ -256,11 +290,18 @@ class FrontierCudaEventOpLogger:
             "batch_num_decode_tokens": batch_num_decode_tokens,
             "timing_mode": self._timing_mode,
             "scope_mode": self._scope_mode,
+            "aggregation_mode": (
+                "per_scope"
+                if self._aggregation_mode == "per_scope"
+                else "batch_sum_legacy"
+            ),
         }
         if batch_request_num_tokens is not None:
             self._batch_meta["batch_request_num_tokens"] = batch_request_num_tokens
         self._pending_events = []
         self._pending_meta = {}
+        self._scope_seq_by_op = {}
+        self._active_scope_keys = []
         if self._timing_mode == "record_function":
             self._profiler = torch.profiler.profile(
                 activities=[
@@ -277,9 +318,20 @@ class FrontierCudaEventOpLogger:
         if op_name not in self._scopes:
             yield
             return
+        scope_seq = self._scope_seq_by_op.get(op_name, 0)
+        self._scope_seq_by_op[op_name] = scope_seq + 1
+        scope_key = (op_name, scope_seq)
         if self._timing_mode == "record_function":
-            with record_function(f"frontier_{op_name}"):
-                yield
+            self._active_scope_keys.append(scope_key)
+            try:
+                with record_function(f"frontier_{op_name}"):
+                    yield
+            finally:
+                popped_key = self._active_scope_keys.pop()
+                if popped_key != scope_key:
+                    raise RuntimeError(
+                        "Frontier CUDA event logger scope stack mismatch."
+                    )
             return
 
         if self._scope_mode == "kernel_only":
@@ -288,6 +340,7 @@ class FrontierCudaEventOpLogger:
         start_event = torch.cuda.Event(enable_timing=True)
         end_event = torch.cuda.Event(enable_timing=True)
         start_event.record()
+        self._active_scope_keys.append(scope_key)
         try:
             yield
         finally:
@@ -297,7 +350,12 @@ class FrontierCudaEventOpLogger:
             ):
                 torch.cuda.synchronize()
             end_event.record()
-            self._pending_events.append((op_name, start_event, end_event))
+            self._pending_events.append((op_name, scope_seq, start_event, end_event))
+            popped_key = self._active_scope_keys.pop()
+            if popped_key != scope_key:
+                raise RuntimeError(
+                    "Frontier CUDA event logger scope stack mismatch."
+                )
 
     def record_meta(self, op_name: str, meta: dict[str, Any]) -> None:
         if not self._meta_enabled:
@@ -308,9 +366,22 @@ class FrontierCudaEventOpLogger:
             )
         if op_name not in self._scopes:
             return
-        existing = self._pending_meta.get(op_name)
+        meta_key: object = op_name
+        if self._aggregation_mode == "per_scope":
+            if not self._active_scope_keys:
+                raise RuntimeError(
+                    f"Frontier CUDA event logger meta recorded outside active scope for {op_name}."
+                )
+            active_op_name, scope_seq = self._active_scope_keys[-1]
+            if active_op_name != op_name:
+                raise RuntimeError(
+                    "Frontier CUDA event logger meta op does not match active scope: "
+                    f"{op_name} vs {active_op_name}"
+                )
+            meta_key = (op_name, scope_seq)
+        existing = self._pending_meta.get(meta_key)
         if existing is None:
-            self._pending_meta[op_name] = meta
+            self._pending_meta[meta_key] = meta
             return
         if existing != meta:
             raise RuntimeError(
@@ -321,7 +392,7 @@ class FrontierCudaEventOpLogger:
         if not self._batch_active:
             raise RuntimeError(
                 "Frontier CUDA event logger finish_batch without start_batch.")
-        aggregated: dict[str, dict[str, float]] = {}
+        records: list[dict[str, Any]] = []
         allow_empty_batch = (
             self._allow_empty_pure_decode_batch
             and self._batch_meta.get("batch_num_prefill_tokens", 0) == 0
@@ -339,8 +410,26 @@ class FrontierCudaEventOpLogger:
             if (self._batch_meta.get("batch_num_prefill_tokens", 0) == 0
                     and self._batch_meta.get("batch_num_decode_tokens", 0) > 0):
                 allow_zero_cuda_ops.add("attn_kv_cache_save")
-            aggregated = _frontier_aggregate_record_function_trace(
-                trace_path, self._scopes, allow_zero_cuda_ops=allow_zero_cuda_ops)
+            if self._aggregation_mode == "per_scope":
+                records = _frontier_collect_record_function_scopes(
+                    trace_path,
+                    self._scopes,
+                    allow_zero_cuda_ops=allow_zero_cuda_ops,
+                )
+            else:
+                aggregated = _frontier_aggregate_record_function_trace(
+                    trace_path,
+                    self._scopes,
+                    allow_zero_cuda_ops=allow_zero_cuda_ops,
+                )
+                records = [
+                    {
+                        "op_name": op_name,
+                        "cuda_time_ms": stats["cuda_time_ms"],
+                        "count": int(stats["count"]),
+                    }
+                    for op_name, stats in aggregated.items()
+                ]
             self._profiler = None
         else:
             if not self._pending_events:
@@ -349,44 +438,81 @@ class FrontierCudaEventOpLogger:
                     self._batch_active = False
                     self._pending_events = []
                     self._pending_meta = {}
+                    self._scope_seq_by_op = {}
+                    self._active_scope_keys = []
                     return
                 raise RuntimeError(
                     "Frontier CUDA event logger captured no operations.")
             torch.cuda.synchronize()
-            for op_name, start_event, end_event in self._pending_events:
-                duration_ms = start_event.elapsed_time(end_event)
-                if duration_ms <= 0:
-                    raise RuntimeError(
-                        f"Non-positive CUDA time for op {op_name}: {duration_ms}")
-                stats = aggregated.setdefault(op_name, {
-                    "cuda_time_ms": 0.0,
-                    "count": 0.0
-                })
-                stats["cuda_time_ms"] += float(duration_ms)
-                stats["count"] += 1.0
+            if self._aggregation_mode == "per_scope":
+                for op_name, scope_seq, start_event, end_event in self._pending_events:
+                    duration_ms = start_event.elapsed_time(end_event)
+                    if duration_ms <= 0:
+                        raise RuntimeError(
+                            f"Non-positive CUDA time for op {op_name}: {duration_ms}")
+                    records.append({
+                        "op_name": op_name,
+                        "cuda_time_ms": float(duration_ms),
+                        "count": 1,
+                        "scope_seq": scope_seq,
+                    })
+            else:
+                aggregated: dict[str, dict[str, float]] = {}
+                for op_name, _scope_seq, start_event, end_event in self._pending_events:
+                    duration_ms = start_event.elapsed_time(end_event)
+                    if duration_ms <= 0:
+                        raise RuntimeError(
+                            f"Non-positive CUDA time for op {op_name}: {duration_ms}")
+                    stats = aggregated.setdefault(op_name, {
+                        "cuda_time_ms": 0.0,
+                        "count": 0.0
+                    })
+                    stats["cuda_time_ms"] += float(duration_ms)
+                    stats["count"] += 1.0
+                records = [
+                    {
+                        "op_name": op_name,
+                        "cuda_time_ms": stats["cuda_time_ms"],
+                        "count": int(stats["count"]),
+                    }
+                    for op_name, stats in aggregated.items()
+                ]
 
-        if not aggregated:
+        if not records:
             if allow_empty_batch:
                 torch.cuda.synchronize()
                 self._batch_active = False
                 self._pending_events = []
                 self._pending_meta = {}
+                self._scope_seq_by_op = {}
+                self._active_scope_keys = []
                 return
             raise RuntimeError(
                 "Frontier CUDA event logger captured no operations.")
         timestamp = time.time()
-        for op_name, stats in aggregated.items():
-            meta = self._pending_meta.get(op_name)
+        for pending_record in records:
+            op_name = str(pending_record["op_name"])
+            scope_seq = pending_record.get("scope_seq")
+            meta_key: object = op_name
+            if self._aggregation_mode == "per_scope":
+                if scope_seq is None:
+                    raise RuntimeError(
+                        f"Missing scope_seq for per-scope record of op {op_name}."
+                    )
+                meta_key = (op_name, int(scope_seq))
+            meta = self._pending_meta.get(meta_key)
             if self._meta_enabled and meta is None:
                 raise RuntimeError(
                     f"Missing runtime meta for op {op_name} in batch.")
             record = {
                 **self._batch_meta,
                 "op_name": op_name,
-                "cuda_time_ms": stats["cuda_time_ms"],
-                "count": int(stats["count"]),
+                "cuda_time_ms": float(pending_record["cuda_time_ms"]),
+                "count": int(pending_record["count"]),
                 "timestamp": timestamp,
             }
+            if scope_seq is not None:
+                record["scope_seq"] = int(scope_seq)
             if meta is not None:
                 record["meta"] = meta
             self._log_file.write(json.dumps(record) + "\n")
@@ -394,6 +520,8 @@ class FrontierCudaEventOpLogger:
         self._batch_active = False
         self._pending_events = []
         self._pending_meta = {}
+        self._scope_seq_by_op = {}
+        self._active_scope_keys = []
 
 
 class FrontierMoeRoutingLogger:

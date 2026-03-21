@@ -18,20 +18,19 @@ def tensor_model_parallel_all_reduce(
 ) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group."""
     tp_group = get_tp_group()
-    if (record_scope_name and tp_group.world_size > 1
-            and should_record_frontier_op_meta(record_scope_name)):
-        record_frontier_op_meta(
-            record_scope_name,
-            {
-                "collective_base_op_name": record_scope_name,
-                "collective_domain": "TP",
-                "collective_group_unique_name": tp_group.unique_name,
-                "collective_rank_in_group": tp_group.rank_in_group,
-                "collective_world_size": tp_group.world_size,
-            },
-        )
     if record_scope_name and tp_group.world_size > 1:
         with record_function_or_nullcontext(record_scope_name):
+            if should_record_frontier_op_meta(record_scope_name):
+                record_frontier_op_meta(
+                    record_scope_name,
+                    {
+                        "collective_base_op_name": record_scope_name,
+                        "collective_domain": "TP",
+                        "collective_group_unique_name": tp_group.unique_name,
+                        "collective_rank_in_group": tp_group.rank_in_group,
+                        "collective_world_size": tp_group.world_size,
+                    },
+                )
             return tp_group.all_reduce(input_)
     return tp_group.all_reduce(input_)
 
