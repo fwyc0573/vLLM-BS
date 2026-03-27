@@ -4,6 +4,7 @@
 import copy
 import gc
 import os
+import time
 from contextlib import AbstractContextManager, nullcontext
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -443,15 +444,49 @@ class Worker(WorkerBase):
         scheduler_output: "SchedulerOutput",
     ) -> Optional[Union[ModelRunnerOutput, AsyncModelRunnerOutput]]:
         intermediate_tensors = None
+        pp_recv_start_ts = None
+        pp_recv_end_ts = None
+        pp_send_start_ts = None
+        pp_send_end_ts = None
+        activation_bytes_per_rank = 0
+        frontier_pp_boundary_trace_enabled = frontier_trace.is_pp_boundary_logging_enabled()
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         if forward_pass and not get_pp_group().is_first_rank:
+            if frontier_pp_boundary_trace_enabled:
+                pp_recv_start_ts = time.monotonic()
             intermediate_tensors = IntermediateTensors(
                 get_pp_group().recv_tensor_dict(
                     all_gather_group=get_tp_group()))
+            if frontier_pp_boundary_trace_enabled:
+                pp_recv_end_ts = time.monotonic()
+                activation_bytes_per_rank = sum(
+                    tensor.numel() * tensor.element_size()
+                    for tensor in intermediate_tensors.tensors.values()
+                )
 
         output = self.model_runner.execute_model(scheduler_output,
                                                  intermediate_tensors)
         if isinstance(output, (ModelRunnerOutput, AsyncModelRunnerOutput)):
+            if frontier_pp_boundary_trace_enabled and forward_pass:
+                trace_context = self.model_runner._frontier_pp_boundary_trace_context
+                if trace_context is None:
+                    raise RuntimeError(
+                        "Frontier PP boundary trace context is missing for a "
+                        "forward-pass model output."
+                    )
+                if activation_bytes_per_rank == 0:
+                    activation_bytes_per_rank = int(
+                        trace_context.get("activation_bytes_per_rank", 0)
+                    )
+                frontier_trace.log_pp_boundary_record({
+                    **trace_context,
+                    "timestamp": time.time(),
+                    "activation_bytes_per_rank": activation_bytes_per_rank,
+                    "recv_start_ts": pp_recv_start_ts,
+                    "recv_end_ts": pp_recv_end_ts,
+                    "send_start_ts": pp_send_start_ts,
+                    "send_end_ts": pp_send_end_ts,
+                })
             return output
 
         assert isinstance(output, IntermediateTensors)
@@ -459,8 +494,35 @@ class Worker(WorkerBase):
         assert parallel_config.distributed_executor_backend != (
             "external_launcher") and not get_pp_group().is_last_rank
 
+        if frontier_pp_boundary_trace_enabled:
+            pp_send_start_ts = time.monotonic()
         get_pp_group().send_tensor_dict(output.tensors,
                                         all_gather_group=get_tp_group())
+        if frontier_pp_boundary_trace_enabled:
+            pp_send_end_ts = time.monotonic()
+            send_activation_bytes = sum(
+                tensor.numel() * tensor.element_size()
+                for tensor in output.tensors.values()
+            )
+            activation_bytes_per_rank = max(
+                activation_bytes_per_rank,
+                send_activation_bytes,
+            )
+            trace_context = self.model_runner._frontier_pp_boundary_trace_context
+            if trace_context is None:
+                raise RuntimeError(
+                    "Frontier PP boundary trace context is missing for a "
+                    "forward-pass intermediate output."
+                )
+            frontier_trace.log_pp_boundary_record({
+                **trace_context,
+                "timestamp": time.time(),
+                "activation_bytes_per_rank": activation_bytes_per_rank,
+                "recv_start_ts": pp_recv_start_ts,
+                "recv_end_ts": pp_recv_end_ts,
+                "send_start_ts": pp_send_start_ts,
+                "send_end_ts": pp_send_end_ts,
+            })
 
         kv_connector_output = output.kv_connector_output
         if not kv_connector_output:

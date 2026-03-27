@@ -445,6 +445,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             dtype=torch.int64,
             device="cpu",
             pin_memory=self.pin_memory)
+        self._frontier_pp_boundary_trace_context: Optional[dict[str, Any]] = None
 
         # Frontier comparison instrumentation
         if (FRONTIER_CUDA_EVENT_OP_LOG_PATH
@@ -2139,6 +2140,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
+        self._frontier_pp_boundary_trace_context = None
+        frontier_pp_boundary_trace_enabled = (
+            FRONTIER_INSTRUMENTATION_ENABLED
+            and frontier_trace.is_pp_boundary_logging_enabled()
+        )
+        frontier_preprocess_start_ts = None
+        frontier_preprocess_end_ts = None
         with record_function_or_nullcontext("Preprocess"):
             self._update_states(scheduler_output)
             if not scheduler_output.total_num_scheduled_tokens:
@@ -2157,6 +2165,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 # Ensure prior step has finished with reused CPU tensors.
                 self.prepare_inputs_event.synchronize()
             try:
+                if frontier_pp_boundary_trace_enabled:
+                    frontier_preprocess_start_ts = time.monotonic()
                 # Prepare the decoder inputs.
                 (attn_metadata, logits_indices, spec_decode_metadata,
                  num_scheduled_tokens_np, spec_decode_common_attn_metadata,
@@ -2176,6 +2186,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 intermediate_tensors,
                 model_kwargs,
             ) = self._preprocess(scheduler_output, intermediate_tensors)
+            if frontier_pp_boundary_trace_enabled:
+                frontier_preprocess_end_ts = time.monotonic()
 
             uniform_decode = (max_query_len
                               == self.uniform_decode_query_len) and (
@@ -2199,7 +2211,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if trace_active:
             frontier_op_logger = self._frontier_cuda_event_op_logger
             frontier_moe_logger = self._frontier_moe_routing_logger
-            if FRONTIER_BATCH_LOG_ENABLED or frontier_op_logger is not None:
+            if (FRONTIER_BATCH_LOG_ENABLED or frontier_op_logger is not None
+                    or frontier_pp_boundary_trace_enabled):
                 batch_req_ids = list(self.input_batch.req_ids)
                 req_tokens = []
                 num_prefill_tokens = 0
@@ -2216,6 +2229,34 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 frontier_req_tokens = req_tokens
                 frontier_num_prefill_tokens = num_prefill_tokens
                 frontier_num_decode_tokens = num_decode_tokens
+            frontier_forward_start_ts = None
+            if frontier_pp_boundary_trace_enabled:
+                frontier_forward_start_ts = time.monotonic()
+                frontier_pp_group = get_pp_group()
+                if frontier_batch_req_ids is None:
+                    raise RuntimeError(
+                        "Frontier PP boundary trace metadata is missing request IDs."
+                    )
+                if frontier_preprocess_start_ts is None or frontier_preprocess_end_ts is None:
+                    raise RuntimeError(
+                        "Frontier PP boundary trace metadata is missing preprocess timing."
+                    )
+                self._frontier_pp_boundary_trace_context = {
+                    "model_name": self.model_config.model,
+                    "batch_id": self._frontier_batch_id,
+                    "batch_size": self.input_batch.num_reqs,
+                    "tensor_parallel_degree": self.parallel_config.tensor_parallel_size,
+                    "num_prefill_tokens": frontier_num_prefill_tokens,
+                    "num_decode_tokens": frontier_num_decode_tokens,
+                    "request_ids": list(frontier_batch_req_ids),
+                    "pp_rank": frontier_pp_group.rank_in_group,
+                    "pp_world_size": frontier_pp_group.world_size,
+                    "is_first_rank": frontier_pp_group.is_first_rank,
+                    "is_last_rank": frontier_pp_group.is_last_rank,
+                    "preprocess_start_ts": frontier_preprocess_start_ts,
+                    "preprocess_end_ts": frontier_preprocess_end_ts,
+                    "forward_start_ts": frontier_forward_start_ts,
+                }
             if frontier_op_logger is not None:
                 frontier_op_logger.start_batch(
                     batch_id=self._frontier_batch_id,
@@ -2263,6 +2304,17 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
+        frontier_forward_end_ts = None
+        if frontier_pp_boundary_trace_enabled:
+            frontier_forward_end_ts = time.monotonic()
+            if self._frontier_pp_boundary_trace_context is None:
+                raise RuntimeError(
+                    "Frontier PP boundary trace context is missing before "
+                    "forward-end capture."
+                )
+            self._frontier_pp_boundary_trace_context[
+                "forward_end_ts"
+            ] = frontier_forward_end_ts
 
         # Frontier instrumentation: record end event and collect metrics
         if trace_active:
