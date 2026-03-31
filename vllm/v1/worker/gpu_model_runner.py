@@ -2265,6 +2265,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     batch_num_prefill_tokens=frontier_num_prefill_tokens,
                     batch_num_decode_tokens=frontier_num_decode_tokens,
                     batch_request_num_tokens=frontier_req_tokens,
+                    pp_rank=get_pp_group().rank_in_group,
                 )
             if frontier_moe_logger is not None:
                 frontier_moe_logger.start_batch(
