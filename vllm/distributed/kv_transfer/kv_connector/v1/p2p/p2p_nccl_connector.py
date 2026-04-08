@@ -10,6 +10,8 @@ import torch
 from vllm.config import VllmConfig
 from vllm.distributed.kv_transfer.kv_connector.v1.base import (
     KVConnectorBase_V1, KVConnectorMetadata, KVConnectorRole)
+from vllm.distributed.kv_transfer.kv_connector.v1.p2p.frontier_kv_transfer_logger import (  # noqa: E501
+    FrontierKVTransferJSONLLogger)
 from vllm.distributed.kv_transfer.kv_connector.v1.p2p.p2p_nccl_engine import (
     P2pNcclEngine)
 from vllm.distributed.parallel_state import get_world_group
@@ -104,6 +106,14 @@ class P2pNcclConnector(KVConnectorBase_V1):
             hostname="",
             port_offset=port_offset,
         ) if role == KVConnectorRole.WORKER else None
+        self._frontier_kv_transfer_logger = (
+            FrontierKVTransferJSONLLogger.from_env(
+                role=role.name.lower(),
+                rank=self._rank,
+                local_rank=self._local_rank,
+            )
+            if role == KVConnectorRole.WORKER else None
+        )
 
     # ==============================
     # Worker-side methods
@@ -219,6 +229,11 @@ class P2pNcclConnector(KVConnectorBase_V1):
 
                 inject_kv_into_layer(layer, kv_cache, request.block_ids,
                                      request.request_id)
+                if self._frontier_kv_transfer_logger is not None:
+                    self._frontier_kv_transfer_logger.log_consumer_layer_inject_end(
+                        request_id=request.request_id,
+                        layer_name=layer_name,
+                    )
 
     def wait_for_layer_load(self, layer_name: str) -> None:
         """Blocking until the KV for a specific layer is loaded into vLLM's
@@ -304,6 +319,12 @@ class P2pNcclConnector(KVConnectorBase_V1):
                 remote_address = base_ip + ":" + str(int(self.config.kv_port) + remote_port_offset)
 
             kv_cache = extract_kv_from_layer(kv_layer, request.block_ids)
+            if self._frontier_kv_transfer_logger is not None:
+                self._frontier_kv_transfer_logger.log_producer_layer_send_start(
+                    request_id=request_id,
+                    layer_name=layer_name,
+                    remote_address=remote_address,
+                )
             with record_function_or_nullcontext("kv_p2p_send"):
                 self.p2p_nccl_engine.send_tensor(request_id + "#" + layer_name,
                                                  kv_cache, remote_address)
