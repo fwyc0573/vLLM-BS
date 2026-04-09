@@ -82,6 +82,14 @@ class P2pNcclConnector(KVConnectorBase_V1):
             if role == KVConnectorRole.WORKER else 0
         self._local_rank = get_world_group().local_rank \
             if role == KVConnectorRole.WORKER else 0
+        self._frontier_kv_transfer_logger = (
+            FrontierKVTransferJSONLLogger.from_env(
+                role=role,
+                rank=self._rank,
+                local_rank=self._local_rank,
+            )
+            if role == KVConnectorRole.WORKER else None
+        )
 
         # Calculate port_offset to avoid port collisions in TP>1 and DP>1 scenarios.
         # When kv_rank is set (disaggregated mode), we use:
@@ -106,14 +114,6 @@ class P2pNcclConnector(KVConnectorBase_V1):
             hostname="",
             port_offset=port_offset,
         ) if role == KVConnectorRole.WORKER else None
-        self._frontier_kv_transfer_logger = (
-            FrontierKVTransferJSONLLogger.from_env(
-                role=role.name.lower(),
-                rank=self._rank,
-                local_rank=self._local_rank,
-            )
-            if role == KVConnectorRole.WORKER else None
-        )
 
     # ==============================
     # Worker-side methods
