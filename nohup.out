@@ -1,433 +1,0 @@
-=== Checking GPU 5 availability ===
-==========================================
-Monolithic Offline Profiling
-==========================================
-Date: Fri Dec 19 09:49:19 PM HKT 2025
-Working directory: /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/monolithic
-Python: /research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/bin/python
-/research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/lib/python3.10/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
-  import pynvml  # type: ignore[import]
-vLLM version: 0.10.3.dev0+g01efc7ef7.d20251206
-
-Configuration:
-  - Model: microsoft/Phi-tiny-MoE-instruct
-  - Requests: 1
-  - Prefill tokens: 1024
-  - Decode tokens: 8
-  - Seed: 42
-  - Warmup iterations: 3
-  - Profiling: enabled
-  - Profile max decode tokens: 256
-  - Profiler dir: /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/monolithic/profiles
-  - GPU: 5
-  - GPU Memory Utilization: 0.8
-
-=== Running monolithic profiling ===
-Command: CUDA_VISIBLE_DEVICES=5 python /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/examples/offline_inference/simple_profiling.py \\n    --num-requests 1 \
-    --prefill-tokens 1024 \
-    --decode-tokens 8 \
-    --seed 42 \
-    --warmup-iters 3 \
-    --model "microsoft/Phi-tiny-MoE-instruct" \
-    --gpu-memory-utilization 0.8 \
-    --profile --profile-max-decode-tokens 256
-
-+ CUDA_VISIBLE_DEVICES=5
-+ python /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/examples/offline_inference/simple_profiling.py --num-requests 1 --prefill-tokens 1024 --decode-tokens 8 --seed 42 --warmup-iters 3 --model microsoft/Phi-tiny-MoE-instruct --gpu-memory-utilization 0.8 --profile --profile-max-decode-tokens 256
-/research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/lib/python3.10/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
-  import pynvml  # type: ignore[import]
-INFO 12-19 21:50:09 [__init__.py:216] Automatically detected platform cuda.
-INFO 12-19 21:50:16 [utils.py:328] non-default args: {'max_model_len': 1032, 'gpu_memory_utilization': 0.8, 'disable_log_stats': True, 'model': 'microsoft/Phi-tiny-MoE-instruct'}
-WARNING 12-19 21:50:16 [__init__.py:554] The global random seed is set to 0. Since VLLM_ENABLE_V1_MULTIPROCESSING is set to False, this may affect the random state of the Python process that launched vLLM.
-INFO 12-19 21:50:35 [__init__.py:742] Resolved architecture: PhiMoEForCausalLM
-`torch_dtype` is deprecated! Use `dtype` instead!
-INFO 12-19 21:50:35 [__init__.py:1815] Using max model len 1032
-INFO 12-19 21:50:38 [scheduler.py:222] Chunked prefill is enabled with max_num_batched_tokens=16384.
-INFO 12-19 21:50:40 [core.py:76] Initializing a V1 LLM engine (v0.10.3.dev0+g01efc7ef7.d20251206) with config: model='microsoft/Phi-tiny-MoE-instruct', speculative_config=None, tokenizer='microsoft/Phi-tiny-MoE-instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=1032, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=False, kv_cache_dtype=auto, device_config=cuda, decoding_config=DecodingConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_backend=''), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None), seed=0, served_model_name=microsoft/Phi-tiny-MoE-instruct, enable_prefix_caching=False, chunked_prefill_enabled=True, use_async_output_proc=True, pooler_config=None, compilation_config={"level":3,"debug_dump_path":"","cache_dir":"","backend":"","custom_ops":[],"splitting_ops":["vllm.unified_attention","vllm.unified_attention_with_output","vllm.mamba_mixer2","vllm.mamba_mixer","vllm.short_conv","vllm.linear_attention","vllm.plamo2_mamba_mixer","vllm.gdn_attention"],"use_inductor":true,"compile_sizes":[],"inductor_compile_config":{"enable_auto_functionalized_v2":false},"inductor_passes":{},"cudagraph_mode":1,"use_cudagraph":true,"cudagraph_num_of_warmups":1,"cudagraph_capture_sizes":[512,504,496,488,480,472,464,456,448,440,432,424,416,408,400,392,384,376,368,360,352,344,336,328,320,312,304,296,288,280,272,264,256,248,240,232,224,216,208,200,192,184,176,168,160,152,144,136,128,120,112,104,96,88,80,72,64,56,48,40,32,24,16,8,4,2,1],"cudagraph_copy_inputs":false,"full_cuda_graph":false,"pass_config":{},"max_capture_size":512,"local_cache_dir":null}
-W1219 21:50:47.417000 4059113 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-W1219 21:50:47.417000 4059113 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-INFO 12-19 21:50:49 [gpu_worker.py:73] Profiling enabled. Traces will be saved to: /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/monolithic/profiles
-[W1219 21:50:49.290505872 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-INFO 12-19 21:50:49 [parallel_state.py:1165] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0, EP rank 0
-INFO 12-19 21:50:50 [topk_topp_sampler.py:58] Using FlashInfer for top-p & top-k sampling.
-INFO 12-19 21:50:50 [gpu_model_runner.py:2338] Starting to load model microsoft/Phi-tiny-MoE-instruct...
-INFO 12-19 21:50:50 [gpu_model_runner.py:2370] Loading model from scratch...
-INFO 12-19 21:50:50 [cuda.py:309] Using FlashInfer backend on V1 engine.
-INFO 12-19 21:50:51 [weight_utils.py:348] Using model weights format ['*.safetensors']
-Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
-Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:00<00:00,  1.96it/s]
-Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.23it/s]
-Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.30it/s]
-
-INFO 12-19 21:50:53 [default_loader.py:268] Loading weights took 1.66 seconds
-INFO 12-19 21:50:54 [gpu_model_runner.py:2392] Model loading took 6.9957 GiB and 3.174007 seconds
-[rank0]:W1219 21:50:54.940000 4059113 site-packages/torch/_logging/_internal.py:1154] [0/0] Profiler function <class 'torch.autograd.profiler.record_function'> will be ignored
-INFO 12-19 21:51:07 [backends.py:539] Using cache directory: /research/d1/gds/ytyang/PYTHONUSER/cache/vllm/torch_compile_cache/66318db793/rank_0_0/backbone for vLLM's torch.compile
-INFO 12-19 21:51:07 [backends.py:550] Dynamo bytecode transform time: 12.80 s
-INFO 12-19 21:51:10 [backends.py:161] Directly load the compiled graph(s) for dynamic shape from the cache, took 3.280 s
-WARNING 12-19 21:51:11 [fused_moe.py:728] Using default MoE config. Performance might be sub-optimal! Config file not found at ['/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/vllm/model_executor/layers/fused_moe/configs/E=16,N=448,device_name=NVIDIA_A800-SXM4-80GB.json']
-INFO 12-19 21:51:13 [monitor.py:34] torch.compile takes 12.80 s in total
-[rank0]:W1219 21:51:14.029000 4059113 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 21:51:14.029000 4059113 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-[rank0]:W1219 21:51:14.047000 4059113 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 21:51:14.047000 4059113 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-INFO 12-19 21:51:15 [gpu_worker.py:298] Available KV cache memory: 55.66 GiB
-INFO 12-19 21:51:15 [kv_cache_utils.py:864] GPU KV cache size: 911,952 tokens
-INFO 12-19 21:51:15 [kv_cache_utils.py:868] Maximum concurrency for 1,032 tokens per request: 863.59x
-INFO 12-19 21:51:15 [kernel_warmup.py:52] Warming up FlashInfer attention.
-[rank0]:W1219 21:51:21.520000 4059113 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 21:51:21.520000 4059113 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-[rank0]:W1219 21:51:21.658000 4059113 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 21:51:21.658000 4059113 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   0%|          | 0/67 [00:00<?, ?it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   1%|▏         | 1/67 [00:00<00:07,  8.42it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   4%|▍         | 3/67 [00:00<00:06, 10.33it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   7%|▋         | 5/67 [00:00<00:05, 10.89it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  10%|█         | 7/67 [00:00<00:05, 11.13it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  13%|█▎        | 9/67 [00:00<00:05, 11.24it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  16%|█▋        | 11/67 [00:01<00:05, 11.18it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  19%|█▉        | 13/67 [00:01<00:04, 11.26it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  22%|██▏       | 15/67 [00:01<00:04, 11.14it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  25%|██▌       | 17/67 [00:01<00:04, 11.13it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  28%|██▊       | 19/67 [00:01<00:04, 11.09it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  31%|███▏      | 21/67 [00:01<00:04, 11.01it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  34%|███▍      | 23/67 [00:02<00:03, 11.10it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  37%|███▋      | 25/67 [00:02<00:03, 11.15it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  40%|████      | 27/67 [00:02<00:03, 11.21it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  43%|████▎     | 29/67 [00:02<00:03, 11.16it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  46%|████▋     | 31/67 [00:02<00:03, 11.15it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  49%|████▉     | 33/67 [00:02<00:03, 11.29it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  52%|█████▏    | 35/67 [00:03<00:02, 11.62it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  55%|█████▌    | 37/67 [00:03<00:02, 11.82it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  58%|█████▊    | 39/67 [00:03<00:02, 11.82it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  61%|██████    | 41/67 [00:03<00:02, 11.97it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  64%|██████▍   | 43/67 [00:03<00:02, 11.96it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  67%|██████▋   | 45/67 [00:03<00:01, 12.09it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  70%|███████   | 47/67 [00:04<00:01, 12.06it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  73%|███████▎  | 49/67 [00:04<00:01, 12.12it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  76%|███████▌  | 51/67 [00:04<00:01, 12.15it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  79%|███████▉  | 53/67 [00:04<00:01, 12.12it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  82%|████████▏ | 55/67 [00:04<00:00, 12.13it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  85%|████████▌ | 57/67 [00:04<00:00, 12.12it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  88%|████████▊ | 59/67 [00:05<00:00, 12.14it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  91%|█████████ | 61/67 [00:05<00:00, 12.00it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  94%|█████████▍| 63/67 [00:05<00:00, 12.00it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  97%|█████████▋| 65/67 [00:05<00:00, 11.94it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 67/67 [00:05<00:00, 11.68it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 67/67 [00:05<00:00, 11.56it/s]
-INFO 12-19 21:51:31 [gpu_model_runner.py:3118] Graph capturing finished in 6 secs, took 1.00 GiB
-INFO 12-19 21:51:31 [gpu_worker.py:391] Free memory on device (78.76/79.25 GiB) on startup. Desired GPU memory utilization is (0.8, 63.4 GiB). Actual usage is 7.0 GiB for weight, 0.72 GiB for peak activation, 0.02 GiB for non-torch memory, and 1.0 GiB for CUDAGraph memory. Replace gpu_memory_utilization config with `--kv-cache-memory=58535188787` to fit into requested memory, or `--kv-cache-memory=75031045632` to fully utilize gpu memory. Current kv cache memory in use is 59766217011 bytes.
-INFO 12-19 21:51:32 [core.py:218] init engine (profile, create kv cache, warmup model) took 38.59 seconds
-INFO 12-19 21:51:33 [llm.py:295] Supported_tasks: ('generate',)
-INFO 12-19 21:51:33 [__init__.py:36] No IOProcessor plugins requested by the model
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 191.08it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  6.65it/s, est. speed input: 6807.35 toks/s, output: 53.17 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  6.65it/s, est. speed input: 6807.35 toks/s, output: 53.17 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  6.63it/s, est. speed input: 6807.35 toks/s, output: 53.17 toks/s]
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 481.94it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  9.45it/s, est. speed input: 9680.63 toks/s, output: 75.61 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  9.45it/s, est. speed input: 9680.63 toks/s, output: 75.61 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  9.43it/s, est. speed input: 9680.63 toks/s, output: 75.61 toks/s]
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 576.77it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  9.51it/s, est. speed input: 9740.41 toks/s, output: 76.08 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  9.51it/s, est. speed input: 9740.41 toks/s, output: 76.08 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  9.49it/s, est. speed input: 9740.41 toks/s, output: 76.08 toks/s]
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 469.06it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  6.10it/s, est. speed input: 6249.95 toks/s, output: 48.82 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  6.10it/s, est. speed input: 6249.95 toks/s, output: 48.82 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  6.09it/s, est. speed input: 6249.95 toks/s, output: 48.82 toks/s]
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
-                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
-                                                Forward         0.00%       0.000us         0.00%       0.000us       0.000us     145.297ms       232.50%     145.297ms      18.162ms             8  
-                                             moe_gating         0.00%       0.000us         0.00%       0.000us       0.000us      15.525ms        24.84%      15.525ms     485.153us            32  
-                                       fused_moe_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      14.488ms        23.18%      14.488ms      28.296us           512  
-                                            attn_decode         0.00%       0.000us         0.00%       0.000us       0.000us       7.921ms        12.68%       7.921ms      35.362us           224  
-                                             Preprocess         0.00%       0.000us         0.00%       0.000us       0.000us       6.812ms        10.90%       6.812ms     851.493us             8  
-                            vllm::inplace_fused_experts         1.93%       3.150ms        11.57%      18.885ms     590.158us       5.951ms         9.52%       7.185ms     224.541us            32  
-                                       moe_grouped_gemm         0.00%       0.000us         0.00%       0.000us       0.000us       5.951ms         9.52%       5.951ms      92.979us            64  
-batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf...         1.28%       2.084ms         3.79%       6.190ms      24.181us       5.166ms         8.27%       5.166ms      20.181us           256  
-                                               aten::mm         1.05%       1.707ms         1.52%       2.486ms      34.531us       5.143ms         8.23%       5.143ms      71.424us            72  
-ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_rel...         0.00%       0.000us         0.00%       0.000us       0.000us       4.727ms         7.56%       4.727ms      21.101us           224  
-                                             moe_expert         0.00%       0.000us         0.00%       0.000us       0.000us       4.266ms         6.83%       4.266ms     133.327us            32  
-ampere_bf16_s16816gemm_bf16_128x256_ldg8_f2f_stages_...         0.00%       0.000us         0.00%       0.000us       0.000us       3.511ms         5.62%       3.511ms     109.716us            32  
-ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_f2f...         0.00%       0.000us         0.00%       0.000us       0.000us       3.449ms         5.52%       3.449ms      15.397us           224  
-                                            aten::addmm         0.57%     934.688us         0.74%       1.207ms      37.707us       3.410ms         5.46%       3.410ms     106.576us            32  
-ampere_bf16_s16816gemm_bf16_256x128_ldg8_relu_f2f_st...         0.00%       0.000us         0.00%       0.000us       0.000us       3.410ms         5.46%       3.410ms     106.576us            32  
-                                           attn_prefill         0.00%       0.000us         0.00%       0.000us       0.000us       2.477ms         3.96%       2.477ms      77.401us            32  
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us       2.337ms         3.74%       2.337ms       4.564us           512  
-void flashinfer::BatchPrefillWithPagedKVCacheKernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       2.284ms         3.65%       2.284ms      71.361us            32  
-void flashinfer::BatchPrefillWithPagedKVCacheKernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       2.105ms         3.37%       2.105ms       9.397us           224  
-                                            Postprocess         0.00%       0.000us         0.00%       0.000us       0.000us       1.915ms         3.06%       1.915ms     239.371us             8  
-         triton_red_fused_add_addmm_native_layer_norm_0         0.00%       0.000us         0.00%       0.000us       0.000us       1.854ms         2.97%       1.854ms       7.242us           256  
-         triton_red_fused_add_addmm_native_layer_norm_1         0.00%       0.000us         0.00%       0.000us       0.000us       1.831ms         2.93%       1.831ms       7.151us           256  
-void at::native::_scatter_gather_elementwise_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       1.415ms         2.26%       1.415ms       2.763us           512  
-void vllm::moe::moe_sum_kernel<c10::BFloat16, 2>(c10...         0.00%       0.000us         0.00%       0.000us       0.000us       1.351ms         2.16%       1.351ms       5.279us           256  
-                  _C_cache_ops::reshape_and_cache_flash         0.83%       1.361ms         2.24%       3.656ms      14.280us       1.300ms         2.08%       1.300ms       5.078us           256  
-void vllm::reshape_and_cache_flash_kernel<__nv_bfloa...         0.00%       0.000us         0.00%       0.000us       0.000us       1.300ms         2.08%       1.300ms       5.078us           256  
-                                     attn_kv_cache_save         0.00%       0.000us         0.00%       0.000us       0.000us       1.300ms         2.08%       1.300ms       5.078us           256  
-ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_6...         0.00%       0.000us         0.00%       0.000us       0.000us       1.221ms         1.95%       1.221ms     152.655us             8  
-void vllm::moe::moe_align_block_size_small_batch_exp...         0.00%       0.000us         0.00%       0.000us       0.000us       1.212ms         1.94%       1.212ms       5.413us           224  
-void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       1.173ms         1.88%       1.173ms       2.291us           512  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.139ms         1.82%       1.139ms       2.224us           512  
-void (anonymous namespace)::softmax_warp_forward<c10...         0.00%       0.000us         0.00%       0.000us       0.000us       1.109ms         1.78%       1.109ms       2.167us           512  
-void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us     990.357us         1.58%     990.357us       1.934us           512  
-                                          memcpy32_post         0.00%       0.000us         0.00%       0.000us       0.000us     952.116us         1.52%     952.116us       1.417us           672  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     950.623us         1.52%     950.623us       1.857us           512  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     912.244us         1.46%     912.244us       1.782us           512  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     842.461us         1.35%     842.461us       1.645us           512  
-void flashinfer::PersistentVariableLengthMergeStates...         0.00%       0.000us         0.00%       0.000us       0.000us     777.661us         1.24%     777.661us       3.472us           224  
-                                 triton_poi_fused_cat_2         0.00%       0.000us         0.00%       0.000us       0.000us     775.681us         1.24%     775.681us       3.030us           256  
-         triton_red_fused_add_addmm_native_layer_norm_1         0.41%     663.917us         0.56%     908.407us      28.388us     751.933us         1.20%     751.933us      23.498us            32  
-                                        _moe_C::moe_sum         0.08%     123.412us         0.21%     340.470us      10.640us     690.658us         1.11%     690.658us      21.583us            32  
-void dot_kernel<float, 128, 0, cublasDotParams<cubla...         0.00%       0.000us         0.00%       0.000us       0.000us     661.428us         1.06%     661.428us       2.953us           224  
-void vllm::act_and_mul_kernel<c10::BFloat16, &(c10::...         0.00%       0.000us         0.00%       0.000us       0.000us     640.799us         1.03%     640.799us       2.503us           256  
-         triton_red_fused_add_addmm_native_layer_norm_0         0.39%     633.152us         0.52%     850.881us      26.590us     616.035us         0.99%     616.035us      19.251us            32  
-void at::native::_scatter_gather_elementwise_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us     599.453us         0.96%     599.453us       2.342us           256  
-                                             aten::mul_         1.82%       2.971ms         2.58%       4.216ms      16.468us     587.936us         0.94%     587.936us       2.297us           256  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     587.936us         0.94%     587.936us       2.297us           256  
-                                 triton_poi_fused_cat_3         0.00%       0.000us         0.00%       0.000us       0.000us     584.734us         0.94%     584.734us       2.358us           248  
-void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     512.163us         0.82%     512.163us       2.001us           256  
-void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us     499.200us         0.80%     499.200us       1.950us           256  
-                                           aten::gather         0.43%     706.117us         0.69%       1.121ms      17.521us     451.873us         0.72%     451.873us       7.061us            64  
-void reduce_1Block_kernel<float, 128, 7, cublasGemvT...         0.00%       0.000us         0.00%       0.000us       0.000us     434.745us         0.70%     434.745us       1.941us           224  
-                                triton_poi_fused_view_4         0.00%       0.000us         0.00%       0.000us       0.000us     408.250us         0.65%     408.250us       1.646us           248  
-                                            aten::copy_         0.78%       1.268ms         3.04%       4.959ms      19.448us     406.972us         0.65%     447.101us       1.753us           255  
-                                              aten::max         0.73%       1.197ms         1.01%       1.642ms      25.657us     387.389us         0.62%     387.389us       6.053us            64  
-                                          moe_shuffling         0.00%       0.000us         0.00%       0.000us       0.000us     350.137us         0.56%     350.137us      10.942us            32  
-                           _moe_C::moe_align_block_size         0.17%     275.880us         0.56%     909.789us      28.431us     304.281us         0.49%     304.281us       9.509us            32  
-                                            aten::clamp         0.40%     653.291us         0.59%     962.997us      13.375us     289.948us         0.46%     289.948us       4.027us            72  
-void cutlass::Kernel2<cutlass_80_tensorop_s16816gemm...         0.00%       0.000us         0.00%       0.000us       0.000us     262.275us         0.42%     262.275us       8.196us            32  
-                                 triton_poi_fused_cat_2         0.27%     446.794us         0.41%     662.586us      20.706us     253.345us         0.41%     253.345us       7.917us            32  
-                                              aten::sub         0.50%     815.033us         0.80%       1.298ms      14.427us     251.133us         0.40%     251.133us       2.790us            90  
-                                       _C::silu_and_mul         0.11%     175.941us         0.23%     379.885us      11.871us     239.715us         0.38%     239.715us       7.491us            32  
-                                                 Sample         0.00%       0.000us         0.00%       0.000us       0.000us     215.711us         0.35%     215.711us      26.964us             8  
-                                              aten::cat         0.39%     631.677us         0.59%     961.210us      15.019us     206.848us         0.33%     206.848us       3.232us            64  
-                                               Bookkeep         0.00%       0.000us         0.00%       0.000us       0.000us     197.345us         0.32%     197.345us      24.668us             8  
-void vllm::moe::moe_align_block_size_kernel<long>(lo...         0.00%       0.000us         0.00%       0.000us       0.000us     196.540us         0.31%     196.540us       6.142us            32  
-                         Memcpy DtoD (Device -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     196.095us         0.31%     196.095us       2.043us            96  
-                                         aten::_softmax         0.30%     496.213us         0.49%     798.567us      12.478us     190.879us         0.31%     190.879us       2.982us            64  
-                                              aten::div         0.32%     514.324us         0.50%     816.886us      12.764us     188.869us         0.30%     188.869us       2.951us            64  
-                                          aten::scatter         0.22%     364.784us         0.55%     889.462us      27.796us     176.667us         0.28%     241.370us       7.543us            32  
-                                     aten::masked_fill_         0.23%     370.605us         0.42%     684.163us      10.690us     136.766us         0.22%     136.766us       2.137us            64  
-                                               aten::gt         0.49%     803.869us         0.71%       1.152ms      17.192us     133.278us         0.21%     133.278us       1.989us            67  
-                                              aten::abs         0.42%     680.302us         1.47%       2.393ms      18.697us     132.833us         0.21%     265.666us       2.076us           128  
-                                           aten::argmax         0.08%     129.280us         0.12%     187.985us      20.887us     123.199us         0.20%     123.199us      13.689us             9  
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     123.199us         0.20%     123.199us      15.400us             8  
-                                triton_poi_fused_view_4         0.14%     227.596us         0.24%     393.782us      12.703us     121.789us         0.19%     121.789us       3.929us            31  
-                                 triton_poi_fused_cat_3         0.18%     301.495us         0.30%     483.062us      15.583us     118.910us         0.19%     118.910us       3.836us            31  
-void vllm::moe::count_and_sort_expert_tokens_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us     107.741us         0.17%     107.741us       3.367us            32  
-void cublasLt::splitKreduce_kernel<32, 16, int, floa...         0.00%       0.000us         0.00%       0.000us       0.000us      94.625us         0.15%      94.625us       2.957us            32  
-                         Memcpy HtoD (Pinned -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us      88.795us         0.14%      88.795us       1.110us            80  
-triton_red_fused__to_copy_embedding_native_layer_nor...         0.00%       0.000us         0.00%       0.000us       0.000us      55.362us         0.09%      55.362us       6.920us             8  
-void cublasLt::splitKreduce_kernel<32, 16, int, __nv...         0.00%       0.000us         0.00%       0.000us       0.000us      53.504us         0.09%      53.504us       6.688us             8  
-                                            aten::index         0.11%     180.303us         0.34%     556.545us      69.568us      48.768us         0.08%      71.936us       8.992us             8  
-void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      48.768us         0.08%      48.768us       6.096us             8  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      46.080us         0.07%      46.080us       2.880us            16  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      37.790us         0.06%      37.790us       4.724us             8  
-                                 triton_poi_fused_cat_1         0.00%       0.000us         0.00%       0.000us       0.000us      23.936us         0.04%      23.936us       2.992us             8  
-                              _copy_page_indices_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      21.313us         0.03%      21.313us       2.664us             8  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      20.865us         0.03%      20.865us       2.608us             8  
-triton_red_fused__to_copy_embedding_native_layer_nor...         0.02%      28.118us         0.03%      44.820us      44.820us      18.272us         0.03%      18.272us      18.272us             1  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      16.607us         0.03%      16.607us       2.076us             8  
-                         Memcpy DtoH (Device -> Pinned)         0.00%       0.000us         0.00%       0.000us       0.000us      16.161us         0.03%      16.161us       2.020us             8  
-                                            aten::fill_         0.03%      56.388us         0.07%     114.500us      11.450us      15.136us         0.02%      15.136us       1.514us            10  
-                                triton_poi_fused_view_3         0.00%       0.000us         0.00%       0.000us       0.000us      13.247us         0.02%      13.247us       1.656us             8  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      13.056us         0.02%      13.056us       1.865us             7  
-                       Memcpy HtoD (Pageable -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us       9.505us         0.02%       9.505us       1.056us             9  
-batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf...         0.07%     115.854us         0.12%     190.412us      23.801us       8.319us         0.01%       8.319us       1.040us             8  
-                                 triton_poi_fused_cat_1         0.01%      18.479us         0.02%      26.239us      26.239us       7.776us         0.01%       7.776us       7.776us             1  
-                                triton_poi_fused_view_3         0.00%       7.511us         0.01%      12.939us      12.939us       3.872us         0.01%       3.872us       3.872us             1  
-void at::native::vectorized_elementwise_kernel<2, at...         0.00%       0.000us         0.00%       0.000us       0.000us       2.080us         0.00%       2.080us       2.080us             1  
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
-Self CPU time total: 163.202ms
-Self CUDA time total: 62.493ms
-
---------------------------------------------------
-Total generation wall-clock time: 0.169000 s
-Prompt: 'For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For '
-Generated text: ' the 20-stone,'
---------------------------------------------------
-[rank0]:[W1219 21:52:04.902116430 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-+ EXIT_CODE=0
-+ set +x
-
-Exit code: 0
-==========================================
-=== Checking GPU 5 availability ===
-==========================================
-Monolithic Offline Profiling
-==========================================
-Date: Fri Dec 19 10:32:07 PM HKT 2025
-Working directory: /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/monolithic
-Python: /research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/bin/python
-/research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/lib/python3.10/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
-  import pynvml  # type: ignore[import]
-vLLM version: 0.10.3.dev0+g01efc7ef7.d20251206
-
-Configuration:
-  - Model: microsoft/Phi-tiny-MoE-instruct
-  - Requests: 1
-  - Prefill tokens: 1024
-  - Decode tokens: 8
-  - Seed: 42
-  - Warmup iterations: 3
-  - Profiling: enabled
-  - Profile max decode tokens: 256
-  - Profiler dir: /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/monolithic/profiles
-  - GPU: 5
-  - GPU Memory Utilization: 0.8
-
-=== Running monolithic profiling ===
-Command: CUDA_VISIBLE_DEVICES=5 python /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/examples/offline_inference/simple_profiling.py \\n    --num-requests 1 \
-    --prefill-tokens 1024 \
-    --decode-tokens 8 \
-    --seed 42 \
-    --warmup-iters 3 \
-    --model "microsoft/Phi-tiny-MoE-instruct" \
-    --gpu-memory-utilization 0.8 \
-    --profile --profile-max-decode-tokens 256
-
-+ CUDA_VISIBLE_DEVICES=5
-+ python /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/examples/offline_inference/simple_profiling.py --num-requests 1 --prefill-tokens 1024 --decode-tokens 8 --seed 42 --warmup-iters 3 --model microsoft/Phi-tiny-MoE-instruct --gpu-memory-utilization 0.8 --profile --profile-max-decode-tokens 256
-/research/d1/gds/ytyang/anaconda3/envs/vllm-bs-0.10.2/lib/python3.10/site-packages/torch/cuda/__init__.py:63: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.
-  import pynvml  # type: ignore[import]
-INFO 12-19 22:32:25 [__init__.py:216] Automatically detected platform cuda.
-INFO 12-19 22:32:28 [utils.py:328] non-default args: {'max_model_len': 2056, 'gpu_memory_utilization': 0.8, 'disable_log_stats': True, 'enforce_eager': True, 'model': 'microsoft/Phi-tiny-MoE-instruct'}
-WARNING 12-19 22:32:28 [__init__.py:554] The global random seed is set to 0. Since VLLM_ENABLE_V1_MULTIPROCESSING is set to False, this may affect the random state of the Python process that launched vLLM.
-INFO 12-19 22:32:40 [__init__.py:742] Resolved architecture: PhiMoEForCausalLM
-`torch_dtype` is deprecated! Use `dtype` instead!
-INFO 12-19 22:32:40 [__init__.py:1815] Using max model len 2056
-INFO 12-19 22:32:41 [scheduler.py:222] Chunked prefill is enabled with max_num_batched_tokens=16384.
-INFO 12-19 22:32:41 [__init__.py:3400] Cudagraph is disabled under eager mode
-INFO 12-19 22:32:43 [core.py:76] Initializing a V1 LLM engine (v0.10.3.dev0+g01efc7ef7.d20251206) with config: model='microsoft/Phi-tiny-MoE-instruct', speculative_config=None, tokenizer='microsoft/Phi-tiny-MoE-instruct', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=2056, download_dir=None, load_format=auto, tensor_parallel_size=1, pipeline_parallel_size=1, data_parallel_size=1, disable_custom_all_reduce=False, quantization=None, enforce_eager=True, kv_cache_dtype=auto, device_config=cuda, decoding_config=DecodingConfig(backend='auto', disable_fallback=False, disable_any_whitespace=False, disable_additional_properties=False, reasoning_backend=''), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None), seed=0, served_model_name=microsoft/Phi-tiny-MoE-instruct, enable_prefix_caching=False, chunked_prefill_enabled=True, use_async_output_proc=True, pooler_config=None, compilation_config={"level":0,"debug_dump_path":"","cache_dir":"","backend":"","custom_ops":[],"splitting_ops":null,"use_inductor":true,"compile_sizes":[],"inductor_compile_config":{"enable_auto_functionalized_v2":false},"inductor_passes":{},"cudagraph_mode":0,"use_cudagraph":true,"cudagraph_num_of_warmups":0,"cudagraph_capture_sizes":[],"cudagraph_copy_inputs":false,"full_cuda_graph":false,"pass_config":{},"max_capture_size":0,"local_cache_dir":null}
-W1219 22:32:46.172000 4077236 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-W1219 22:32:46.172000 4077236 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-INFO 12-19 22:32:47 [gpu_worker.py:73] Profiling enabled. Traces will be saved to: /research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/tests/monolithic/profiles
-[W1219 22:32:47.272037859 ProcessGroupNCCL.cpp:981] Warning: TORCH_NCCL_AVOID_RECORD_STREAMS is the default now, this environment variable is thus deprecated. (function operator())
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-[Gloo] Rank 0 is connected to 0 peer ranks. Expected number of connected peer ranks is : 0
-INFO 12-19 22:32:47 [parallel_state.py:1165] rank 0 in world size 1 is assigned as DP rank 0, PP rank 0, TP rank 0, EP rank 0
-INFO 12-19 22:32:47 [topk_topp_sampler.py:58] Using FlashInfer for top-p & top-k sampling.
-INFO 12-19 22:32:48 [gpu_model_runner.py:2338] Starting to load model microsoft/Phi-tiny-MoE-instruct...
-INFO 12-19 22:32:48 [gpu_model_runner.py:2370] Loading model from scratch...
-INFO 12-19 22:32:48 [cuda.py:309] Using FlashInfer backend on V1 engine.
-INFO 12-19 22:32:48 [weight_utils.py:348] Using model weights format ['*.safetensors']
-Loading safetensors checkpoint shards:   0% Completed | 0/2 [00:00<?, ?it/s]
-Loading safetensors checkpoint shards:  50% Completed | 1/2 [00:00<00:00,  2.08it/s]
-Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.33it/s]
-Loading safetensors checkpoint shards: 100% Completed | 2/2 [00:01<00:00,  1.41it/s]
-
-INFO 12-19 22:32:51 [default_loader.py:268] Loading weights took 1.51 seconds
-INFO 12-19 22:32:51 [gpu_model_runner.py:2392] Model loading took 6.9957 GiB and 2.762359 seconds
-WARNING 12-19 22:32:51 [fused_moe.py:728] Using default MoE config. Performance might be sub-optimal! Config file not found at ['/research/d1/gds/ytyang/yichengfeng/frontier/sota-infer-engine/vllm/vllm/model_executor/layers/fused_moe/configs/E=16,N=448,device_name=NVIDIA_A800-SXM4-80GB.json']
-[rank0]:W1219 22:32:52.681000 4077236 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 22:32:52.681000 4077236 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-[rank0]:W1219 22:32:52.691000 4077236 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 22:32:52.691000 4077236 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-INFO 12-19 22:32:53 [gpu_worker.py:298] Available KV cache memory: 55.60 GiB
-INFO 12-19 22:32:53 [kv_cache_utils.py:864] GPU KV cache size: 910,960 tokens
-INFO 12-19 22:32:53 [kv_cache_utils.py:868] Maximum concurrency for 2,056 tokens per request: 437.96x
-INFO 12-19 22:32:53 [kernel_warmup.py:52] Warming up FlashInfer attention.
-[rank0]:W1219 22:32:53.723000 4077236 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 22:32:53.723000 4077236 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-[rank0]:W1219 22:32:53.725000 4077236 site-packages/torch/utils/cpp_extension.py:2425] TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
-[rank0]:W1219 22:32:53.725000 4077236 site-packages/torch/utils/cpp_extension.py:2425] If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'] to specific architectures.
-INFO 12-19 22:32:53 [gpu_worker.py:391] Free memory on device (78.76/79.25 GiB) on startup. Desired GPU memory utilization is (0.8, 63.4 GiB). Actual usage is 7.0 GiB for weight, 0.79 GiB for peak activation, 0.02 GiB for non-torch memory, and 0.0 GiB for CUDAGraph memory. Replace gpu_memory_utilization config with `--kv-cache-memory=59543918899` to fit into requested memory, or `--kv-cache-memory=76039775744` to fully utilize gpu memory. Current kv cache memory in use is 59701205299 bytes.
-INFO 12-19 22:32:53 [core.py:218] init engine (profile, create kv cache, warmup model) took 2.44 seconds
-INFO 12-19 22:32:54 [llm.py:295] Supported_tasks: ('generate',)
-INFO 12-19 22:32:54 [__init__.py:36] No IOProcessor plugins requested by the model
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 218.90it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]WARNING 12-19 22:32:56 [cudagraph_dispatcher.py:102] cudagraph dispatching keys are not initialized. No cudagraph will be used.
-Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.53it/s, est. speed input: 2593.39 toks/s, output: 20.26 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.53it/s, est. speed input: 2593.39 toks/s, output: 20.26 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.53it/s, est. speed input: 2593.39 toks/s, output: 20.26 toks/s]
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 537.59it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.98it/s, est. speed input: 3047.26 toks/s, output: 23.81 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.98it/s, est. speed input: 3047.26 toks/s, output: 23.81 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.97it/s, est. speed input: 3047.26 toks/s, output: 23.81 toks/s]
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 705.64it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.99it/s, est. speed input: 3058.58 toks/s, output: 23.89 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.99it/s, est. speed input: 3058.58 toks/s, output: 23.89 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.98it/s, est. speed input: 3058.58 toks/s, output: 23.89 toks/s]
-Adding requests:   0%|          | 0/1 [00:00<?, ?it/s]Adding requests: 100%|██████████| 1/1 [00:00<00:00, 570.11it/s]
-Processed prompts:   0%|          | 0/1 [00:00<?, ?it/s, est. speed input: 0.00 toks/s, output: 0.00 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.14it/s, est. speed input: 2190.82 toks/s, output: 17.12 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.14it/s, est. speed input: 2190.82 toks/s, output: 17.12 toks/s]Processed prompts: 100%|██████████| 1/1 [00:00<00:00,  2.14it/s, est. speed input: 2190.82 toks/s, output: 17.12 toks/s]
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
-                                                   Name    Self CPU %      Self CPU   CPU total %     CPU total  CPU time avg     Self CUDA   Self CUDA %    CUDA total  CUDA time avg    # of Calls  
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
-                                                Forward         0.00%       0.000us         0.00%       0.000us       0.000us     449.789ms       520.04%     449.789ms      56.224ms             8  
-                                             moe_gating         0.00%       0.000us         0.00%       0.000us       0.000us     106.491ms       123.12%     106.491ms     207.990us           512  
-                                             moe_expert         0.00%       0.000us         0.00%       0.000us       0.000us      36.175ms        41.83%      36.175ms     141.309us           256  
-                                            aten::addmm         2.87%      13.342ms         3.60%      16.730ms      32.676us      18.125ms        20.96%      18.125ms      35.399us           512  
-                            vllm::inplace_fused_experts         4.41%      20.497ms        26.50%     123.120ms     480.938us      17.170ms        19.85%      21.746ms      84.945us           256  
-                                       fused_moe_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      17.170ms        19.85%      17.170ms      33.536us           512  
-                                       moe_grouped_gemm         0.00%       0.000us         0.00%       0.000us       0.000us      17.170ms        19.85%      17.170ms      33.536us           512  
-ampere_bf16_s16816gemm_bf16_64x64_sliced1x2_ldg8_rel...         0.00%       0.000us         0.00%       0.000us       0.000us       9.425ms        10.90%       9.425ms      21.038us           448  
-                                            attn_decode         0.00%       0.000us         0.00%       0.000us       0.000us       7.628ms         8.82%       7.628ms      34.055us           224  
-                                aten::native_layer_norm         1.29%       5.983ms         3.39%      15.769ms      30.324us       7.244ms         8.38%       7.257ms      13.955us           520  
-void at::native::(anonymous namespace)::vectorized_l...         0.00%       0.000us         0.00%       0.000us       0.000us       7.244ms         8.38%       7.244ms      13.930us           520  
-                                             Preprocess         0.00%       0.000us         0.00%       0.000us       0.000us       6.768ms         7.82%       6.768ms     845.973us             8  
-batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf...         0.43%       1.988ms         1.26%       5.860ms      22.889us       6.286ms         7.27%       6.286ms      24.555us           256  
-ampere_bf16_s16816gemm_bf16_128x256_ldg8_relu_f2f_st...         0.00%       0.000us         0.00%       0.000us       0.000us       4.465ms         5.16%       4.465ms     139.539us            32  
-ampere_bf16_s16816gemm_bf16_256x128_ldg8_relu_f2f_st...         0.00%       0.000us         0.00%       0.000us       0.000us       4.234ms         4.90%       4.234ms     132.319us            32  
-                                              aten::max         1.65%       7.649ms         2.34%      10.890ms      21.269us       3.879ms         4.48%       3.879ms       7.576us           512  
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us       3.879ms         4.48%       3.879ms       7.576us           512  
-                                               aten::mm         1.12%       5.186ms         1.75%       8.129ms      30.793us       3.403ms         3.93%       3.403ms      12.889us           264  
-                                           attn_prefill         0.00%       0.000us         0.00%       0.000us       0.000us       3.071ms         3.55%       3.071ms      95.956us            32  
-void flashinfer::BatchPrefillWithPagedKVCacheKernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       2.827ms         3.27%       2.827ms      88.351us            32  
-void flashinfer::BatchPrefillWithPagedKVCacheKernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       2.456ms         2.84%       2.456ms      10.964us           224  
-                                           aten::gather         1.00%       4.644ms         1.61%       7.474ms      14.569us       2.397ms         2.77%       2.397ms       4.673us           513  
-void at::native::_scatter_gather_elementwise_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       2.388ms         2.76%       2.388ms       4.664us           512  
-                                            aten::copy_         0.83%       3.846ms         2.70%      12.567ms      13.441us       2.179ms         2.52%       2.227ms       2.382us           935  
-                                              aten::cat         0.90%       4.199ms         1.40%       6.514ms      12.722us       2.139ms         2.47%       2.139ms       4.179us           512  
-                                            Postprocess         0.00%       0.000us         0.00%       0.000us       0.000us       2.132ms         2.46%       2.132ms     266.455us             8  
-                                          moe_shuffling         0.00%       0.000us         0.00%       0.000us       0.000us       2.032ms         2.35%       2.032ms       7.939us           256  
-                                              aten::add         1.20%       5.570ms         1.80%       8.385ms      16.125us       2.031ms         2.35%       2.031ms       3.907us           520  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       2.031ms         2.35%       2.031ms       3.968us           512  
-                           _moe_C::moe_align_block_size         0.34%       1.576ms         1.03%       4.794ms      18.726us       1.986ms         2.30%       1.986ms       7.760us           256  
-                                            aten::clamp         0.85%       3.944ms         1.34%       6.209ms      11.941us       1.943ms         2.25%       1.943ms       3.737us           520  
-void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       1.943ms         2.25%       1.943ms       3.796us           512  
-                         Memcpy DtoD (Device -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us       1.893ms         2.19%       1.893ms       2.465us           768  
-                                              aten::sub         0.84%       3.886ms         1.34%       6.217ms      11.555us       1.823ms         2.11%       1.823ms       3.388us           538  
-void at::native::elementwise_kernel<128, 4, at::nati...         0.00%       0.000us         0.00%       0.000us       0.000us       1.802ms         2.08%       1.802ms       3.520us           512  
-                                        _moe_C::moe_sum         0.18%     837.856us         0.49%       2.292ms       8.952us       1.713ms         1.98%       1.713ms       6.690us           256  
-void vllm::moe::moe_sum_kernel<c10::BFloat16, 2>(c10...         0.00%       0.000us         0.00%       0.000us       0.000us       1.713ms         1.98%       1.713ms       6.690us           256  
-                                              aten::div         0.70%       3.261ms         1.14%       5.287ms      10.326us       1.682ms         1.95%       1.682ms       3.286us           512  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.682ms         1.95%       1.682ms       3.286us           512  
-                                         aten::_softmax         0.72%       3.360ms         1.18%       5.486ms      10.715us       1.636ms         1.89%       1.636ms       3.195us           512  
-void (anonymous namespace)::softmax_warp_forward<c10...         0.00%       0.000us         0.00%       0.000us       0.000us       1.636ms         1.89%       1.636ms       3.195us           512  
-void vllm::moe::moe_align_block_size_small_batch_exp...         0.00%       0.000us         0.00%       0.000us       0.000us       1.611ms         1.86%       1.611ms       7.194us           224  
-                                               aten::gt         1.11%       5.150ms         1.59%       7.385ms      14.340us       1.592ms         1.84%       1.592ms       3.092us           515  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.592ms         1.84%       1.592ms       3.110us           512  
-                                   _C::rotary_embedding         0.25%       1.181ms         0.56%       2.587ms      10.105us       1.519ms         1.76%       1.519ms       5.934us           256  
-void vllm::rotary_embedding_kernel<c10::BFloat16, tr...         0.00%       0.000us         0.00%       0.000us       0.000us       1.519ms         1.76%       1.519ms       5.934us           256  
-                                     aten::masked_fill_         0.55%       2.551ms         1.02%       4.730ms       9.237us       1.407ms         1.63%       1.407ms       2.748us           512  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.407ms         1.63%       1.407ms       2.748us           512  
-                  _C_cache_ops::reshape_and_cache_flash         0.24%       1.128ms         0.60%       2.799ms      10.933us       1.400ms         1.62%       1.400ms       5.471us           256  
-void vllm::reshape_and_cache_flash_kernel<__nv_bfloa...         0.00%       0.000us         0.00%       0.000us       0.000us       1.400ms         1.62%       1.400ms       5.471us           256  
-                                     attn_kv_cache_save         0.00%       0.000us         0.00%       0.000us       0.000us       1.400ms         1.62%       1.400ms       5.471us           256  
-                                              aten::abs         0.93%       4.307ms         3.42%      15.891ms      15.519us       1.301ms         1.50%       2.602ms       2.541us          1024  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us       1.301ms         1.50%       1.301ms       2.541us           512  
-ampere_bf16_s16816gemm_bf16_128x64_ldg8_f2f_stages_6...         0.00%       0.000us         0.00%       0.000us       0.000us       1.277ms         1.48%       1.277ms     159.615us             8  
-void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us       1.080ms         1.25%       1.080ms       4.217us           256  
-                                          aten::scatter         0.54%       2.498ms         1.34%       6.211ms      24.263us       1.074ms         1.24%       1.704ms       6.655us           256  
-void at::native::_scatter_gather_elementwise_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us       1.074ms         1.24%       1.074ms       4.196us           256  
-void at::native::(anonymous namespace)::CatArrayBatc...         0.00%       0.000us         0.00%       0.000us       0.000us       1.060ms         1.23%       1.060ms       4.140us           256  
-void flashinfer::PersistentVariableLengthMergeStates...         0.00%       0.000us         0.00%       0.000us       0.000us       1.003ms         1.16%       1.003ms       4.478us           224  
-void dot_kernel<float, 128, 0, cublasDotParams<cubla...         0.00%       0.000us         0.00%       0.000us       0.000us     922.331us         1.07%     922.331us       4.118us           224  
-                                       _C::silu_and_mul         0.26%       1.211ms         0.59%       2.728ms      10.655us     876.607us         1.01%     876.607us       3.424us           256  
-void vllm::act_and_mul_kernel<c10::BFloat16, &(c10::...         0.00%       0.000us         0.00%       0.000us       0.000us     876.607us         1.01%     876.607us       3.424us           256  
-                                             aten::mul_         0.58%       2.687ms         0.84%       3.925ms      15.333us     738.135us         0.85%     738.135us       2.883us           256  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     738.135us         0.85%     738.135us       2.883us           256  
-void reduce_1Block_kernel<float, 128, 7, cublasGemvT...         0.00%       0.000us         0.00%       0.000us       0.000us     702.390us         0.81%     702.390us       3.136us           224  
-                                            aten::fill_         0.35%       1.633ms         0.64%       2.979ms      11.201us     670.939us         0.78%     670.939us       2.522us           266  
-void at::native::vectorized_elementwise_kernel<4, at...         0.00%       0.000us         0.00%       0.000us       0.000us     652.253us         0.75%     652.253us       2.548us           256  
-void cutlass::Kernel2<cutlass_80_tensorop_s16816gemm...         0.00%       0.000us         0.00%       0.000us       0.000us     319.455us         0.37%     319.455us       9.983us            32  
-                                                 Sample         0.00%       0.000us         0.00%       0.000us       0.000us     244.670us         0.28%     244.670us      30.584us             8  
-void vllm::moe::moe_align_block_size_kernel<long>(lo...         0.00%       0.000us         0.00%       0.000us       0.000us     240.667us         0.28%     240.667us       7.521us            32  
-                                               Bookkeep         0.00%       0.000us         0.00%       0.000us       0.000us     185.664us         0.21%     185.664us      23.208us             8  
-                                           aten::argmax         0.03%     135.457us         0.04%     195.678us      21.742us     148.480us         0.17%     148.480us      16.498us             9  
-void at::native::reduce_kernel<512, 1, at::native::R...         0.00%       0.000us         0.00%       0.000us       0.000us     148.480us         0.17%     148.480us      18.560us             8  
-void vllm::moe::count_and_sort_expert_tokens_kernel<...         0.00%       0.000us         0.00%       0.000us       0.000us     134.402us         0.16%     134.402us       4.200us            32  
-void cublasLt::splitKreduce_kernel<32, 16, int, floa...         0.00%       0.000us         0.00%       0.000us       0.000us     117.436us         0.14%     117.436us       3.670us            32  
-                         Memcpy HtoD (Pinned -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us     110.176us         0.13%     110.176us       1.377us            80  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      83.232us         0.10%      83.232us       3.468us            24  
-void cublasLt::splitKreduce_kernel<32, 16, int, __nv...         0.00%       0.000us         0.00%       0.000us       0.000us      64.128us         0.07%      64.128us       8.016us             8  
-                                            aten::index         0.04%     186.543us         0.11%     492.710us      61.589us      58.528us         0.07%      87.551us      10.944us             8  
-void at::native::index_elementwise_kernel<128, 4, at...         0.00%       0.000us         0.00%       0.000us       0.000us      58.528us         0.07%      58.528us       7.316us             8  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      46.431us         0.05%      46.431us       5.804us             8  
-                                     aten::index_select         0.03%     141.770us         0.06%     280.632us      17.540us      33.152us         0.04%      42.272us       2.642us            16  
-void at::native::(anonymous namespace)::indexSelectS...         0.00%       0.000us         0.00%       0.000us       0.000us      33.152us         0.04%      33.152us       4.736us             7  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      26.081us         0.03%      26.081us       3.260us             8  
-                              _copy_page_indices_kernel         0.00%       0.000us         0.00%       0.000us       0.000us      24.673us         0.03%      24.673us       3.084us             8  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      20.479us         0.02%      20.479us       2.560us             8  
-                         Memcpy DtoH (Device -> Pinned)         0.00%       0.000us         0.00%       0.000us       0.000us      18.656us         0.02%      18.656us       2.332us             8  
-void at::native::unrolled_elementwise_kernel<at::nat...         0.00%       0.000us         0.00%       0.000us       0.000us      16.126us         0.02%      16.126us       2.304us             7  
-                                Activity Buffer Request         0.69%       3.197ms         0.69%       3.197ms       1.598ms      14.207us         0.02%      14.207us       7.104us             2  
-                       Memcpy HtoD (Pageable -> Device)         0.00%       0.000us         0.00%       0.000us       0.000us      11.904us         0.01%      11.904us       1.323us             9  
-batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf...         0.03%     120.262us         0.04%     187.895us      23.487us      10.400us         0.01%      10.400us       1.300us             8  
-void at::native::vectorized_gather_kernel<16, long>(...         0.00%       0.000us         0.00%       0.000us       0.000us       9.120us         0.01%       9.120us       9.120us             1  
-void at::native::vectorized_elementwise_kernel<2, at...         0.00%       0.000us         0.00%       0.000us       0.000us       2.560us         0.00%       2.560us       2.560us             1  
-                                             Preprocess         1.18%       5.502ms         2.17%      10.092ms       1.262ms       0.000us         0.00%     162.588us      20.324us             8  
-                                            aten::slice         1.09%       5.077ms         1.49%       6.903ms       2.053us       0.000us         0.00%       0.000us       0.000us          3362  
-                                       aten::as_strided         0.94%       4.387ms         0.94%       4.387ms       0.584us       0.000us         0.00%       0.000us       0.000us          7514  
-                                        cudaMemcpyAsync         1.42%       6.580ms         1.42%       6.580ms       7.607us       0.000us         0.00%       0.000us       0.000us           865  
-                                          aten::flatten         0.01%      36.069us         0.01%      60.013us       7.502us       0.000us         0.00%       0.000us       0.000us             8  
-                                             aten::view         0.52%       2.418ms         0.52%       2.418ms       0.623us       0.000us         0.00%       0.000us       0.000us          3883  
-                                       aten::lift_fresh         0.00%       3.089us         0.00%       3.089us       0.386us       0.000us         0.00%       0.000us       0.000us             8  
--------------------------------------------------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  ------------  
-Self CPU time total: 464.634ms
-Self CUDA time total: 86.491ms
-
---------------------------------------------------
-Total generation wall-clock time: 0.470974 s
-Prompt: 'For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For For '
-Generated text: ' the first the 200 individuals'
---------------------------------------------------
-[rank0]:[W1219 22:33:15.376370097 ProcessGroupNCCL.cpp:1538] Warning: WARNING: destroy_process_group() was not called before program exit, which can leak resources. For more info, please see https://pytorch.org/docs/stable/distributed.html#shutdown (function operator())
-+ EXIT_CODE=0
-+ set +x
-
-Exit code: 0
-==========================================
