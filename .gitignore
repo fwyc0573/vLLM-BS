@@ -235,3 +235,12 @@ build_debug/*
 .vscode
 .agent/
 .mv_conda_env_yml/
+
+# HuggingFace model artifacts (or symlinks into shared model caches) used by
+# Frontier comparison profiling. These are regenerated / re-linked on demand
+# by the corresponding test scripts and should not be tracked inside the
+# vLLM submodule.
+/gpt2
+
+# OMC runtime state written when agents execute inside this submodule worktree
+.omc/
