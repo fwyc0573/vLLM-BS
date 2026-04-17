@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Optional
@@ -8,19 +9,38 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter, UninitializedParameter
-
-from vllm.distributed import (divide, get_tensor_model_parallel_rank,
-                              get_tensor_model_parallel_world_size,
-                              tensor_model_parallel_all_reduce)
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.quantization.base_config import (
     QuantizationConfig, QuantizeMethodBase, method_has_implemented_embedding)
-from vllm.model_executor.layers.utils import dispatch_unquantized_gemm
 from vllm.model_executor.parameter import BasevLLMParameter
 from vllm.model_executor.utils import set_weight_attrs
-from vllm.platforms import current_platform
 
 DEFAULT_VOCAB_PADDING_SIZE = 64
+
+
+def _get_current_platform():
+    from vllm.platforms import current_platform
+    return current_platform
+
+
+def _divide(*args, **kwargs):
+    from vllm.distributed import divide
+    return divide(*args, **kwargs)
+
+
+def _get_tensor_model_parallel_rank():
+    from vllm.distributed import get_tensor_model_parallel_rank
+    return get_tensor_model_parallel_rank()
+
+
+def _get_tensor_model_parallel_world_size():
+    from vllm.distributed import get_tensor_model_parallel_world_size
+    return get_tensor_model_parallel_world_size()
+
+
+def _tensor_model_parallel_all_reduce(*args, **kwargs):
+    from vllm.distributed import tensor_model_parallel_all_reduce
+    return tensor_model_parallel_all_reduce(*args, **kwargs)
 
 
 class UnquantizedEmbeddingMethod(QuantizeMethodBase):
@@ -41,7 +61,7 @@ class UnquantizedEmbeddingMethod(QuantizeMethodBase):
         set_weight_attrs(weight, extra_weight_attrs)
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        if current_platform.is_cpu():
+        if _get_current_platform().is_cpu():
             from vllm.model_executor.layers.utils import (
                 dispatch_cpu_unquantized_gemm)
             dispatch_cpu_unquantized_gemm(layer, remove_weight=False)
@@ -50,6 +70,7 @@ class UnquantizedEmbeddingMethod(QuantizeMethodBase):
               layer: torch.nn.Module,
               x: torch.Tensor,
               bias: Optional[torch.Tensor] = None) -> torch.Tensor:
+        from vllm.model_executor.layers.utils import dispatch_unquantized_gemm
         return dispatch_unquantized_gemm()(layer, x, layer.weight, bias)
 
     def embedding(self, layer: torch.nn.Module,
@@ -76,7 +97,7 @@ def vocab_range_from_global_vocab_size(global_vocab_size: int,
                                        rank: int,
                                        world_size: int,
                                        offset: int = 0) -> Sequence[int]:
-    per_partition_vocab_size = divide(global_vocab_size, world_size)
+    per_partition_vocab_size = _divide(global_vocab_size, world_size)
     return vocab_range_from_per_partition_vocab_size(per_partition_vocab_size,
                                                      rank,
                                                      offset=offset)
@@ -145,7 +166,17 @@ class VocabParallelEmbeddingShardIndices:
         assert self.num_added_elements <= self.num_added_elements_padded
 
 
-@torch.compile(dynamic=True, backend=current_platform.simple_compile_backend)
+def _compile_mask_helper(fn):
+    """Avoid import-time torch.compile startup when compile is disabled."""
+    compile_disabled = os.getenv("TORCH_COMPILE_DISABLE", "")
+    if compile_disabled.lower() in ("1", "true", "yes", "on"):
+        return fn
+    return torch.compile(dynamic=True,
+                         backend=_get_current_platform().
+                         simple_compile_backend)(fn)
+
+
+@_compile_mask_helper
 def get_masked_input_and_mask(
         input_: torch.Tensor, org_vocab_start_index: int,
         org_vocab_end_index: int, num_org_vocab_padding: int,
@@ -217,8 +248,8 @@ class VocabParallelEmbedding(CustomOp):
         super().__init__()
 
         # Keep the input dimensions.
-        tp_rank = get_tensor_model_parallel_rank()
-        self.tp_size = get_tensor_model_parallel_world_size()
+        tp_rank = _get_tensor_model_parallel_rank()
+        self.tp_size = _get_tensor_model_parallel_world_size()
         self.num_embeddings = num_embeddings
         self.padding_size = padding_size
         self.org_vocab_size = org_num_embeddings or num_embeddings
@@ -260,8 +291,8 @@ class VocabParallelEmbedding(CustomOp):
             params_dtype = torch.get_default_dtype()
         # Divide the weight matrix along the vocaburaly dimension.
         self.num_added_embeddings = self.num_embeddings - self.org_vocab_size
-        self.num_embeddings_per_partition = divide(self.num_embeddings_padded,
-                                                   self.tp_size)
+        self.num_embeddings_per_partition = _divide(self.num_embeddings_padded,
+                                                    self.tp_size)
         assert (self.shard_indices.num_elements_padded ==
                 self.num_embeddings_per_partition)
         self.num_org_embeddings_per_partition = (
@@ -417,7 +448,7 @@ class VocabParallelEmbedding(CustomOp):
         if self.tp_size > 1:
             output_parallel.masked_fill_(input_mask.unsqueeze(-1), 0)
         # Reduce across all the model parallel GPUs.
-        output = tensor_model_parallel_all_reduce(output_parallel)
+        output = _tensor_model_parallel_all_reduce(output_parallel)
         return output
 
     def forward_cuda(self, input_):

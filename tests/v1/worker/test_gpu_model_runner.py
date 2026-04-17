@@ -26,7 +26,8 @@ from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
 from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.worker.gpu_input_batch import InputBatch
 from vllm.v1.worker.gpu_model_runner import (
-    GPUModelRunner, _frontier_instrumentation_requires_enforce_eager)
+    GPUModelRunner, _build_mixed_batch_dummy_layout,
+    _frontier_instrumentation_requires_enforce_eager)
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 10
@@ -111,6 +112,32 @@ def model_runner():
 
 
 model_runner_2 = model_runner
+
+
+@pytest.mark.parametrize(
+    ("num_tokens", "max_num_reqs", "expected_scheduled", "expected_seq_lens"),
+    [
+        (16, 8, [1, 1, 1, 1, 1, 1, 1, 9], [1, 1, 1, 1, 1, 1, 1, 10]),
+        (16, 10, [1, 1, 1, 1, 1, 1, 1, 1, 8], [1, 1, 1, 1, 1, 1, 1, 1, 9]),
+        (16, 1, [16], [17]),
+    ],
+)
+def test_build_mixed_batch_dummy_layout_respects_max_num_seqs(
+    num_tokens: int,
+    max_num_reqs: int,
+    expected_scheduled: list[int],
+    expected_seq_lens: list[int],
+) -> None:
+    scheduled, seq_lens = _build_mixed_batch_dummy_layout(
+        num_tokens=num_tokens,
+        max_num_reqs=max_num_reqs,
+    )
+
+    assert scheduled == expected_scheduled
+    assert seq_lens == expected_seq_lens
+    assert len(scheduled) <= max_num_reqs
+    assert len(seq_lens) == len(scheduled)
+    assert sum(scheduled) == num_tokens
 
 
 def _schedule_new_request(*req_ids: str) -> SchedulerOutput:

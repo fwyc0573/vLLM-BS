@@ -79,6 +79,7 @@ class Worker(LocalOrDistributedWorkerBase):
                         "glm4_moe_mtp",
                         "mimo_mtp",
                         "ernie_mtp",
+                        "qwen3_moe_mtp",
                         "qwen3_next_mtp")) \
                     else {"return_hidden_states": True}
 

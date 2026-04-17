@@ -1510,6 +1510,7 @@ class ModelConfig:
                 or self.hf_config.model_type == "mimo_mtp"
                 or self.hf_config.model_type == "glm4_moe_mtp"
                 or self.hf_config.model_type == "ernie_mtp"
+                or self.hf_config.model_type == "qwen3_moe_mtp"
                 or self.hf_config.model_type == "qwen3_next_mtp"):
             total_num_hidden_layers = getattr(self.hf_text_config,
                                               "num_nextn_predict_layers", 0)
@@ -1881,7 +1882,7 @@ class DeviceConfig:
 
 SpeculativeMethod = Literal["ngram", "eagle", "eagle3", "medusa",
                             "mlp_speculator", "draft_model", "deepseek_mtp",
-                            "ernie_mtp", "qwen3_next_mtp"]
+                            "ernie_mtp", "qwen3_moe_mtp", "qwen3_next_mtp"]
 
 
 @config
@@ -2023,6 +2024,15 @@ class SpeculativeConfig:
                 "architectures": ["ErnieMTPModel"]
             })
 
+        if hf_config.model_type == "qwen3_moe":
+            hf_config.model_type = "qwen3_moe_mtp"
+        if hf_config.model_type == "qwen3_moe_mtp":
+            n_predict = getattr(hf_config, "num_nextn_predict_layers", None)
+            hf_config.update({
+                "n_predict": n_predict,
+                "architectures": ["Qwen3MoeMTP"]
+            })
+
         if hf_config.model_type == "qwen3_next":
             hf_config.model_type = "qwen3_next_mtp"
         if hf_config.model_type == "qwen3_next_mtp":
@@ -2051,7 +2061,8 @@ class SpeculativeConfig:
                 (self.target_model_config.hf_text_config.model_type \
                         == "deepseek_v3" or
                     self.target_model_config.hf_text_config.model_type in
-                        ("mimo","ernie4_5_moe", "qwen3_next")):
+                        ("mimo", "ernie4_5_moe", "qwen3_moe",
+                         "qwen3_next")):
                 # use the draft model from the same model:
                 self.model = self.target_model_config.model
                 # Align the quantization of draft model for cases such as
@@ -2164,6 +2175,15 @@ class SpeculativeConfig:
                     if self.num_speculative_tokens > 1:
                         logger.warning(
                                 "All Ernie MTP models only have " \
+                                "one layer. Might need some code changes " \
+                                "to support multiple layers."
+                            )
+                elif (self.draft_model_config.hf_config.model_type ==
+                      "qwen3_moe_mtp"):
+                    self.method = "qwen3_moe_mtp"
+                    if self.num_speculative_tokens > 1:
+                        logger.warning(
+                                "All Qwen3MoE MTP models only have " \
                                 "one layer. Might need some code changes " \
                                 "to support multiple layers."
                             )
@@ -2392,7 +2412,7 @@ class SpeculativeConfig:
 
     def use_eagle(self) -> bool:
         return self.method in ("eagle", "eagle3", "deepseek_mtp", "ernie_mtp",
-                               "qwen3_next_mtp")
+                               "qwen3_moe_mtp", "qwen3_next_mtp")
 
     def __repr__(self) -> str:
         method = self.method

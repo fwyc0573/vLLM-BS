@@ -148,6 +148,18 @@ def _frontier_instrumentation_requires_enforce_eager(
             and cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY)
 
 
+def _build_mixed_batch_dummy_layout(
+    num_tokens: int,
+    max_num_reqs: int,
+) -> tuple[list[int], list[int]]:
+    """Build a mixed decode/prefill dummy batch without exceeding max_num_seqs."""
+    num_decode_tokens = min(num_tokens // 2, max(max_num_reqs - 1, 0))
+    num_prefill_tokens = num_tokens - num_decode_tokens
+    num_scheduled_tokens_list = [1] * num_decode_tokens + [num_prefill_tokens]
+    seq_lens = [1] * num_decode_tokens + [num_prefill_tokens + 1]
+    return num_scheduled_tokens_list, seq_lens
+
+
 # Wrapper for ModelRunnerOutput to support overlapped execution.
 class AsyncGPUModelRunnerOutput(AsyncModelRunnerOutput):
 
@@ -2987,18 +2999,16 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # has num_tokens in total.
         assert num_tokens <= self.scheduler_config.max_num_batched_tokens
         max_num_reqs = self.scheduler_config.max_num_seqs
+        mixed_batch_seq_lens: Optional[list[int]] = None
         if create_mixed_batch:
             assert not uniform_decode
             # Create mixed batch:
             # first half decode tokens, second half one prefill
-            num_decode_tokens = num_tokens // 2
-            num_prefill_tokens = num_tokens - num_decode_tokens
-            num_reqs = num_decode_tokens + 1
-
-            # Create decode requests (1 token each) followed by prefill request
-            num_scheduled_tokens_list = [1] * num_decode_tokens + [
-                num_prefill_tokens
-            ]
+            num_scheduled_tokens_list, mixed_batch_seq_lens = (
+                _build_mixed_batch_dummy_layout(num_tokens, max_num_reqs)
+            )
+            num_prefill_tokens = num_scheduled_tokens_list[-1]
+            num_reqs = len(num_scheduled_tokens_list)
             # Note: Overriding max_query_len to be the prefill tokens
             max_query_len = num_prefill_tokens
         elif uniform_decode:
@@ -3030,7 +3040,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 # In the mixed batch mode (used for FI warmup), we use
                 # shorter sequence lengths to run faster.
                 # TODO(luka) better system for describing dummy batches
-                seq_lens = [1] * num_decode_tokens + [num_prefill_tokens + 1]
+                seq_lens = mixed_batch_seq_lens
             else:
                 # Make sure max_model_len is used at the graph capture time.
                 seq_lens = self.max_model_len

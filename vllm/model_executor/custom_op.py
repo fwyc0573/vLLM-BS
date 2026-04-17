@@ -7,9 +7,13 @@ import torch.nn as nn
 
 from vllm.config import get_cached_compilation_config
 from vllm.logger import init_logger
-from vllm.platforms import current_platform
 
 logger = init_logger(__name__)
+
+
+def _get_current_platform():
+    from vllm.platforms import current_platform
+    return current_platform
 
 
 class CustomOp(nn.Module):
@@ -91,6 +95,8 @@ class CustomOp(nn.Module):
 
         if not enabled:
             return self.forward_native
+
+        current_platform = _get_current_platform()
 
         if current_platform.is_rocm():
             return self.forward_hip

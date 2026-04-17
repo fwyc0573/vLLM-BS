@@ -218,7 +218,8 @@ class EagleProposer:
                 hidden_states=self.hidden_states[:num_input_tokens],
                 inputs_embeds=inputs_embeds,
             )
-            if self.method in ("deepseek_mtp", "ernie_mtp", "qwen3_next_mtp"):
+            if self.method in ("deepseek_mtp", "ernie_mtp", "qwen3_moe_mtp",
+                               "qwen3_next_mtp"):
                 last_hidden_states = ret_hidden_states
                 hidden_states = last_hidden_states
             else:
@@ -329,7 +330,7 @@ class EagleProposer:
                     inputs_embeds=inputs_embeds,
                 )
                 if self.method in ("deepseek_mtp", "ernie_mtp",
-                                   "qwen3_next_mtp"):
+                                   "qwen3_moe_mtp", "qwen3_next_mtp"):
                     last_hidden_states = ret_hidden_states
                     hidden_states = ret_hidden_states
                 else:
