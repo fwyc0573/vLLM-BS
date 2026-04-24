@@ -312,6 +312,16 @@ class Scheduler(SchedulerInterface):
             "batch_num_tokens": int(batch_num_tokens),
             "timestamp": time.time(),
         }
+        prefix_cache_stats = getattr(
+            self.kv_cache_manager, "prefix_cache_stats", None)
+        if prefix_cache_stats is not None:
+            payload.update({
+                "prefix_cache_metric_semantics": "token_level",
+                "prefix_cache_unit": "tokens",
+                "prefix_cache_requests": int(prefix_cache_stats.requests),
+                "prefix_cache_queries": int(prefix_cache_stats.queries),
+                "prefix_cache_hits": int(prefix_cache_stats.hits),
+            })
         _log_frontier_schedule_decision(payload)
 
     def schedule(self) -> SchedulerOutput:
