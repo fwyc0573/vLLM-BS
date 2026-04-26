@@ -1083,7 +1083,11 @@ def fast_plan_decode(
     qo_indptr_host = _get_range_buf(batch_size + 1, "cpu")
 
     try:
-        # Make sure we pass exactly 15 arguments for tensor core version
+        # FlashInfer 0.5.3's tensor-core prefill module plan takes the same
+        # extended argument list used by its public BatchDecode plan path:
+        # window_left, fixed_split_size, disable_split_kv, num_colocated_ctas.
+        # Keep these defaults aligned with the public wrapper so FlashInfer
+        # CUDA graph capture does not fail during the warmup dummy run.
         self._plan_info = self._cached_module.plan(
             self._float_workspace_buffer,
             self._int_workspace_buffer,
@@ -1100,6 +1104,10 @@ def fast_plan_decode(
             head_dim,
             head_dim,
             False,  # causal
+            window_left,
+            -1,  # fixed_split_size
+            False,  # disable_split_kv
+            0,  # num_colocated_ctas
         )
     except Exception as e:
         raise RuntimeError(f"Error in tensor core plan: {e}") from e

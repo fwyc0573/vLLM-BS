@@ -148,6 +148,15 @@ def _frontier_instrumentation_requires_enforce_eager(
             and cudagraph_mode != CUDAGraphMode.FULL_DECODE_ONLY)
 
 
+def _frontier_instrumentation_requires_flashinfer(
+    *,
+    batch_log_enabled: bool,
+    cuda_event_op_log_enabled: bool,
+    moe_routing_log_enabled: bool,
+) -> bool:
+    return cuda_event_op_log_enabled or moe_routing_log_enabled
+
+
 def _build_mixed_batch_dummy_layout(
     num_tokens: int,
     max_num_reqs: int,
@@ -3552,11 +3561,25 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 )
             non_flashinfer = sorted(
                 name for name in backend_names if "FLASHINFER" not in name)
-            if non_flashinfer:
+            if (non_flashinfer and _frontier_instrumentation_requires_flashinfer(
+                    batch_log_enabled=FRONTIER_BATCH_LOG_ENABLED,
+                    cuda_event_op_log_enabled=
+                    FRONTIER_CUDA_EVENT_OP_LOG_ENABLED,
+                    moe_routing_log_enabled=
+                    FRONTIER_MOE_ROUTING_LOG_ENABLED,
+            )):
                 raise RuntimeError(
-                    "Frontier instrumentation requires FlashInfer attention backend. "
+                    "Frontier per-op / MoE routing instrumentation requires FlashInfer attention backend. "
                     f"Detected: {', '.join(sorted(backend_names))}. "
                     "Set VLLM_ATTENTION_BACKEND=FLASHINFER or FLASHINFER_VLLM_V1."
+                )
+            if non_flashinfer:
+                logger.info(
+                    "Frontier lightweight instrumentation enabled without FlashInfer "
+                    "backend (backends=%s, batch_log=%s, pp_boundary=%s)",
+                    sorted(backend_names),
+                    FRONTIER_BATCH_LOG_ENABLED,
+                    frontier_trace.is_pp_boundary_logging_enabled(),
                 )
 
     def initialize_cudagraph_capture(self) -> None:

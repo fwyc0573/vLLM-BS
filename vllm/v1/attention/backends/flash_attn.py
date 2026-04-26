@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Attention layer with FlashAttention."""
 from dataclasses import dataclass
+import os
 from typing import Optional
 
 import numpy as np
@@ -35,6 +36,8 @@ logger = init_logger(__name__)
 
 # NOTE(woosuk): This is an arbitrary number. Tune it if needed.
 _DEFAULT_MAX_NUM_SPLITS_FOR_CUDA_GRAPH = 16
+_FORCED_MAX_NUM_SPLITS_ENV = "VLLM_FLASH_ATTN_FORCE_MAX_NUM_SPLITS"
+_DISABLE_AOT_SCHEDULE_ENV = "VLLM_FLASH_ATTN_DISABLE_AOT_SCHEDULE"
 
 
 class FlashAttentionBackend(AttentionBackend):
@@ -193,6 +196,29 @@ class FlashAttentionMetadataBuilder(
 
         self.max_num_splits = 0  # No upper bound on the number of splits.
         self.aot_schedule = (get_flash_attn_version() == 3)
+        self.forced_max_num_splits: Optional[int] = None
+        if os.environ.get(_DISABLE_AOT_SCHEDULE_ENV) == "1":
+            self.aot_schedule = False
+            logger.info(
+                "FlashAttention AOT scheduler disabled via %s",
+                _DISABLE_AOT_SCHEDULE_ENV,
+            )
+
+        forced_max_num_splits = os.environ.get(_FORCED_MAX_NUM_SPLITS_ENV)
+        if forced_max_num_splits is not None:
+            parsed_max_num_splits = int(forced_max_num_splits)
+            if parsed_max_num_splits < 1:
+                raise ValueError(
+                    f"{_FORCED_MAX_NUM_SPLITS_ENV} must be >= 1, got "
+                    f"{parsed_max_num_splits}"
+                )
+            self.forced_max_num_splits = parsed_max_num_splits
+            self.max_num_splits = parsed_max_num_splits
+            logger.info(
+                "FlashAttention forced max_num_splits=%d via %s",
+                parsed_max_num_splits,
+                _FORCED_MAX_NUM_SPLITS_ENV,
+            )
 
         self.use_full_cuda_graph = \
             self.compilation_config.cudagraph_mode.has_full_cudagraphs()
@@ -334,7 +360,13 @@ class FlashAttentionMetadataBuilder(
             self.scheduler_metadata[n:] = 0
             scheduler_metadata = self.scheduler_metadata[:n]
 
-            if num_actual_tokens <= self.max_cudagraph_size:
+            if self.forced_max_num_splits is not None:
+                # Diagnostic-only override: force the same explicit split cap
+                # into the runtime call even when the batch exceeds the graph
+                # capture size. This lets us test whether FA3 split/combine
+                # behavior is the dominant crash trigger.
+                max_num_splits = self.forced_max_num_splits
+            elif num_actual_tokens <= self.max_cudagraph_size:
                 # NOTE(woosuk): Setting num_splits > 1 may increase the memory
                 # usage, because the intermediate buffers of size [num_splits,
                 # num_heads, num_tokens, head_size] are allocated. Therefore,

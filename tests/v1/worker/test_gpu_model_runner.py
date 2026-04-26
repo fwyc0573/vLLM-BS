@@ -27,7 +27,8 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.worker.gpu_input_batch import InputBatch
 from vllm.v1.worker.gpu_model_runner import (
     GPUModelRunner, _build_mixed_batch_dummy_layout,
-    _frontier_instrumentation_requires_enforce_eager)
+    _frontier_instrumentation_requires_enforce_eager,
+    _frontier_instrumentation_requires_flashinfer)
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 10
@@ -886,4 +887,32 @@ def test_frontier_instrumentation_requires_enforce_eager(
     assert _frontier_instrumentation_requires_enforce_eager(
         enforce_eager=enforce_eager,
         cudagraph_mode=cudagraph_mode,
+    ) is expected
+
+
+@pytest.mark.parametrize(
+    (
+        "batch_log_enabled",
+        "cuda_event_op_log_enabled",
+        "moe_routing_log_enabled",
+        "expected",
+    ),
+    [
+        (False, False, False, False),
+        (True, False, False, False),
+        (False, True, False, True),
+        (False, False, True, True),
+        (True, True, False, True),
+    ],
+)
+def test_frontier_instrumentation_requires_flashinfer(
+    batch_log_enabled,
+    cuda_event_op_log_enabled,
+    moe_routing_log_enabled,
+    expected,
+):
+    assert _frontier_instrumentation_requires_flashinfer(
+        batch_log_enabled=batch_log_enabled,
+        cuda_event_op_log_enabled=cuda_event_op_log_enabled,
+        moe_routing_log_enabled=moe_routing_log_enabled,
     ) is expected

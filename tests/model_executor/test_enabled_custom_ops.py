@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 
+import vllm._custom_ops as custom_ops
 from vllm.config import CompilationConfig, VllmConfig, set_current_vllm_config
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.activation import (GeluAndMul,
@@ -148,6 +151,98 @@ def test_topk_dispatch(use_rocm_aiter: str, monkeypatch):
         assert topk_func == rocm_aiter_topk_softmax
     else:
         assert topk_func == vllm_topk_softmax
+
+
+def test_topk_softmax_wrapper_forwards_renormalize(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_topk_softmax(topk_weights, topk_ids, token_expert_indices,
+                          gating_output, renormalize):
+        captured["args"] = (
+            topk_weights,
+            topk_ids,
+            token_expert_indices,
+            gating_output,
+        )
+        captured["renormalize"] = renormalize
+
+    monkeypatch.setattr(torch.ops,
+                        "_moe_C",
+                        SimpleNamespace(topk_softmax=fake_topk_softmax),
+                        raising=False)
+
+    topk_weights = torch.empty((2, 1), dtype=torch.float32)
+    topk_ids = torch.empty((2, 1), dtype=torch.int32)
+    token_expert_indices = torch.empty((2, 1), dtype=torch.int32)
+    gating_output = torch.empty((2, 8), dtype=torch.float32)
+
+    custom_ops.topk_softmax(
+        topk_weights,
+        topk_ids,
+        token_expert_indices,
+        gating_output,
+        True,
+    )
+
+    assert captured["args"] == (
+        topk_weights,
+        topk_ids,
+        token_expert_indices,
+        gating_output,
+    )
+    assert captured["renormalize"] is True
+
+
+def test_moe_align_block_size_wrapper_forwards_expert_map(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_moe_align_block_size(topk_ids, num_experts, block_size,
+                                  sorted_token_ids, experts_ids,
+                                  num_tokens_post_pad, maybe_expert_map):
+        captured["args"] = (
+            topk_ids,
+            num_experts,
+            block_size,
+            sorted_token_ids,
+            experts_ids,
+            num_tokens_post_pad,
+        )
+        captured["maybe_expert_map"] = maybe_expert_map
+
+    monkeypatch.setattr(torch.ops,
+                        "_moe_C",
+                        SimpleNamespace(
+                            topk_softmax=getattr(torch.ops._moe_C,
+                                                 "topk_softmax", None),
+                            moe_align_block_size=fake_moe_align_block_size,
+                        ),
+                        raising=False)
+
+    topk_ids = torch.empty((2, 1), dtype=torch.int32)
+    sorted_token_ids = torch.empty((4, ), dtype=torch.int32)
+    experts_ids = torch.empty((2, ), dtype=torch.int32)
+    num_tokens_post_pad = torch.empty((1, ), dtype=torch.int32)
+    expert_map = torch.tensor([0, -1, 1, -1], dtype=torch.int32)
+
+    custom_ops.moe_align_block_size(
+        topk_ids,
+        4,
+        16,
+        sorted_token_ids,
+        experts_ids,
+        num_tokens_post_pad,
+        expert_map,
+    )
+
+    assert captured["args"] == (
+        topk_ids,
+        4,
+        16,
+        sorted_token_ids,
+        experts_ids,
+        num_tokens_post_pad,
+    )
+    assert torch.equal(captured["maybe_expert_map"], expert_map)
 
 
 @pytest.mark.parametrize("add_residual", [True, False])

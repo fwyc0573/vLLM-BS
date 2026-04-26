@@ -1478,10 +1478,13 @@ def moe_sum(input: torch.Tensor, output: torch.Tensor):
 def moe_align_block_size(topk_ids: torch.Tensor, num_experts: int,
                          block_size: int, sorted_token_ids: torch.Tensor,
                          experts_ids: torch.Tensor,
-                         num_tokens_post_pad: torch.Tensor) -> None:
+                         num_tokens_post_pad: torch.Tensor,
+                         maybe_expert_map: Optional[torch.Tensor] = None
+                         ) -> None:
     torch.ops._moe_C.moe_align_block_size(topk_ids, num_experts, block_size,
                                           sorted_token_ids, experts_ids,
-                                          num_tokens_post_pad)
+                                          num_tokens_post_pad,
+                                          maybe_expert_map)
 
 
 def moe_wna16_gemm(input: torch.Tensor, output: torch.Tensor,
@@ -1505,9 +1508,9 @@ def moe_wna16_gemm(input: torch.Tensor, output: torch.Tensor,
 
 def topk_softmax(topk_weights: torch.Tensor, topk_ids: torch.Tensor,
                  token_expert_indices: torch.Tensor,
-                 gating_output: torch.Tensor) -> None:
+                 gating_output: torch.Tensor, renormalize: bool) -> None:
     torch.ops._moe_C.topk_softmax(topk_weights, topk_ids, token_expert_indices,
-                                  gating_output)
+                                  gating_output, renormalize)
 
 
 def grouped_topk(scores: torch.Tensor, scores_with_bias: torch.Tensor,
