@@ -124,13 +124,14 @@ def test_prepare_inputs():
         device=device)
     proposer = _create_proposer("eagle", 1)
 
-    updated_metadata, token_indices = proposer.prepare_inputs(
+    updated_metadata, token_indices, request_order = proposer.prepare_inputs(
         common_attn_metadata, num_rejected_tokens.cpu())
 
     assert torch.equal(updated_metadata.query_start_loc,
                        expected_cu_num_tokens)
     assert token_indices.shape[0] == expected_cu_num_tokens[-1].item()
     assert torch.equal(token_indices, expected_token_indices)
+    assert torch.equal(request_order, torch.arange(3, dtype=torch.int64))
 
 
 @pytest.mark.parametrize("method", ["eagle", "eagle3"])

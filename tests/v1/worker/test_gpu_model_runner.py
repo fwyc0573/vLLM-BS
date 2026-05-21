@@ -27,8 +27,10 @@ from vllm.v1.sample.metadata import SamplingMetadata
 from vllm.v1.worker.gpu_input_batch import InputBatch
 from vllm.v1.worker.gpu_model_runner import (
     GPUModelRunner, _build_mixed_batch_dummy_layout,
-    _frontier_instrumentation_requires_enforce_eager,
-    _frontier_instrumentation_requires_flashinfer)
+    _apply_request_order, _frontier_instrumentation_requires_enforce_eager,
+    _frontier_instrumentation_requires_flashinfer,
+    _get_max_num_input_tokens, _get_num_input_tokens_per_req,
+    _restore_request_order)
 
 BLOCK_SIZE = 16
 NUM_BLOCKS = 10
@@ -139,6 +141,45 @@ def test_build_mixed_batch_dummy_layout_respects_max_num_seqs(
     assert len(scheduled) <= max_num_reqs
     assert len(seq_lens) == len(scheduled)
     assert sum(scheduled) == num_tokens
+
+
+def test_spec_decode_input_token_helpers_include_draft_tokens() -> None:
+    scheduled = np.array([1, 4, 2], dtype=np.int32)
+    draft = np.array([3, 0, 2], dtype=np.int32)
+
+    np.testing.assert_array_equal(
+        _get_num_input_tokens_per_req(scheduled),
+        scheduled,
+    )
+    np.testing.assert_array_equal(
+        _get_num_input_tokens_per_req(scheduled, draft),
+        np.array([4, 4, 4], dtype=np.int32),
+    )
+    assert _get_max_num_input_tokens(
+        max_num_batched_tokens=16,
+        max_num_reqs=3,
+        num_speculative_tokens=2,
+    ) == 22
+
+
+def test_spec_decode_request_order_round_trip() -> None:
+    request_order = torch.tensor([2, 0, 1], dtype=torch.int64)
+
+    ordered = _apply_request_order(["r0", "r1", "r2"], request_order)
+    assert ordered == ["r2", "r0", "r1"]
+    assert _restore_request_order(ordered, request_order) == [
+        "r0",
+        "r1",
+        "r2",
+    ]
+
+    tensor = torch.tensor([10, 20, 30], dtype=torch.int64)
+    ordered_tensor = _apply_request_order(tensor, request_order)
+    assert torch.equal(ordered_tensor, torch.tensor([30, 10, 20]))
+    assert torch.equal(
+        _restore_request_order(ordered_tensor, request_order),
+        tensor,
+    )
 
 
 def _schedule_new_request(*req_ids: str) -> SchedulerOutput:

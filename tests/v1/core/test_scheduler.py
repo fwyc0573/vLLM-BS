@@ -12,7 +12,8 @@ from vllm.multimodal.inputs import (MultiModalFeatureSpec,
                                     MultiModalKwargsItem, PlaceholderRange)
 from vllm.sampling_params import GuidedDecodingParams, SamplingParams
 from vllm.v1.core.sched.output import CachedRequestData, SchedulerOutput
-from vllm.v1.core.sched.scheduler import Scheduler
+from vllm.v1.core.sched.scheduler import (Scheduler,
+                                          _get_num_accepted_spec_tokens)
 from vllm.v1.kv_cache_interface import (FullAttentionSpec, KVCacheConfig,
                                         KVCacheGroupSpec)
 from vllm.v1.outputs import DraftTokenIds, ModelRunnerOutput
@@ -21,6 +22,22 @@ from vllm.v1.structured_output import StructuredOutputManager
 from vllm.v1.structured_output.request import StructuredOutputRequest
 
 from .utils import EOS_TOKEN_ID, create_requests, create_scheduler
+
+
+@pytest.mark.parametrize(
+    ("generated_token_ids", "expected"),
+    [
+        ([], 0),
+        ([10], 0),
+        ([10, 11], 1),
+        ([10, 11, 12], 2),
+    ],
+)
+def test_get_num_accepted_spec_tokens_never_goes_negative(
+    generated_token_ids: list[int],
+    expected: int,
+) -> None:
+    assert _get_num_accepted_spec_tokens(generated_token_ids) == expected
 
 
 def test_add_requests():

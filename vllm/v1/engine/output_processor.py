@@ -280,6 +280,12 @@ class RequestState:
 
         if decode_tokens <= 1:
             decode_first_token_latency_ms = 0.0
+        elif self.stats.first_decode_token_ts == 0.0 and (
+                self.stats.last_token_ts <= self.stats.first_token_ts):
+            # Speculative decoding can finish a short request by committing
+            # multiple generation tokens in the prefill step; in that case no
+            # pure decode token exists for this diagnostic metric.
+            decode_first_token_latency_ms = 0.0
         else:
             assert self.stats.first_decode_token_ts > 0.0, (
                 "first_decode_token_ts must be recorded for finished "

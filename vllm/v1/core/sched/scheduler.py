@@ -75,6 +75,15 @@ def _log_flow(message: str) -> None:
         _flow_logger.info(message)
 
 
+def _get_num_accepted_spec_tokens(generated_token_ids: list[int]) -> int:
+    """Return accepted draft tokens, excluding the bonus token.
+
+    Some edge paths can yield an empty token list, so the accepted draft count
+    must never go negative.
+    """
+    return max(len(generated_token_ids) - 1, 0)
+
+
 # ============================================================================
 # Frontier schedule logging (JSONL)
 # Enable via environment variable: VLLM_FRONTIER_SCHED_LOG_PATH=/path/to/file
@@ -1286,7 +1295,10 @@ class Scheduler(SchedulerInterface):
                 scheduler_output.scheduled_spec_decode_tokens.get(req_id))
             if scheduled_spec_token_ids:
                 num_draft_tokens = len(scheduled_spec_token_ids)
-                num_accepted = len(generated_token_ids) - 1
+                num_accepted = min(
+                    _get_num_accepted_spec_tokens(generated_token_ids),
+                    num_draft_tokens,
+                )
                 num_rejected = num_draft_tokens - num_accepted
                 # num_computed_tokens represents the number of tokens
                 # processed in the current step, considering scheduled

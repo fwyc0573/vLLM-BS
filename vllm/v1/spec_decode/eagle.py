@@ -33,6 +33,59 @@ logger = init_logger(__name__)
 PADDING_SLOT_ID = -1
 
 
+def _get_max_num_tokens(
+    max_num_batched_tokens: int,
+    max_num_seqs: int,
+    num_speculative_tokens: int,
+) -> int:
+    """Reserve draft-verification headroom for EAGLE-side buffers."""
+    return max_num_batched_tokens + max_num_seqs * num_speculative_tokens
+
+
+def _resolve_target_num_tokens(
+    target_token_ids: torch.Tensor,
+    target_positions: torch.Tensor,
+    target_hidden_states: torch.Tensor,
+    common_attn_metadata: CommonAttentionMetadata,
+) -> int:
+    """Return the non-padded target-token count described by attention metadata."""
+    num_tokens = int(common_attn_metadata.num_actual_tokens)
+    if num_tokens < 0:
+        raise ValueError(
+            "common_attn_metadata.num_actual_tokens must be non-negative, got "
+            f"{num_tokens}")
+
+    target_lengths = {
+        "target_token_ids": int(target_token_ids.shape[0]),
+        "target_positions": int(target_positions.shape[0]),
+        "target_hidden_states": int(target_hidden_states.shape[0]),
+    }
+    if num_tokens == 0:
+        nonempty_tensors = {
+            name: length
+            for name, length in target_lengths.items()
+            if length != 0
+        }
+        if nonempty_tensors:
+            raise ValueError(
+                "EagleProposer received zero actual target tokens with "
+                f"non-empty target tensors: target_lengths={target_lengths}")
+        return 0
+
+    short_tensors = {
+        name: length
+        for name, length in target_lengths.items()
+        if length < num_tokens
+    }
+    if short_tensors:
+        raise ValueError(
+            "EagleProposer target tensors are shorter than "
+            "common_attn_metadata.num_actual_tokens: "
+            f"num_actual_tokens={num_tokens}, target_lengths={target_lengths}")
+
+    return num_tokens
+
+
 class EagleAttentionMetadata(Protocol):
     # Required attributes
     num_actual_tokens: int
@@ -63,8 +116,11 @@ class EagleProposer:
         self.block_size = vllm_config.cache_config.block_size
         self.num_speculative_tokens = (
             self.speculative_config.num_speculative_tokens)
-        self.max_num_tokens = (
-            vllm_config.scheduler_config.max_num_batched_tokens)
+        self.max_num_tokens = _get_max_num_tokens(
+            vllm_config.scheduler_config.max_num_batched_tokens,
+            vllm_config.scheduler_config.max_num_seqs,
+            self.num_speculative_tokens,
+        )
         self.token_arange_np = np.arange(self.max_num_tokens)
         # We need to get the hidden size from the draft model config because
         # the draft model's hidden size can be different from the target model's
@@ -100,6 +156,12 @@ class EagleProposer:
             max_batch_size + 1,
             device=device,
             dtype=torch.int32,
+        )
+        self.arange_cpu = torch.arange(
+            max_batch_size + 1,
+            device="cpu",
+            dtype=torch.int32,
+            pin_memory=is_pin_memory_available(),
         )
 
         self.inputs_embeds = torch.zeros(
@@ -145,6 +207,17 @@ class EagleProposer:
             dtype=torch.int32,
         ).repeat(max_batch_size, 1)
 
+    def _get_intermediate_tensors(self, num_tokens: int):
+        if get_pp_group().is_first_rank:
+            return None
+
+        assert self.runner is not None
+        return self.runner.sync_and_slice_intermediate_tensors(
+            num_tokens,
+            None,
+            False,
+        )
+
     def propose(
         self,
         # [num_tokens]
@@ -159,8 +232,22 @@ class EagleProposer:
         sampling_metadata: SamplingMetadata,
         mm_embeds: Optional[list[torch.Tensor]] = None,
     ) -> torch.Tensor:
-        num_tokens = target_token_ids.shape[0]
+        num_tokens = _resolve_target_num_tokens(
+            target_token_ids,
+            target_positions,
+            target_hidden_states,
+            common_attn_metadata,
+        )
         batch_size = next_token_ids.shape[0]
+        if num_tokens == 0:
+            return torch.empty(
+                (batch_size, 0),
+                dtype=torch.int32,
+                device=next_token_ids.device,
+            )
+        target_token_ids = target_token_ids[:num_tokens]
+        target_positions = target_positions[:num_tokens]
+        target_hidden_states = target_hidden_states[:num_tokens]
         last_token_indices = common_attn_metadata.query_start_loc[1:] - 1
 
         if self.method == "eagle3":
@@ -179,9 +266,11 @@ class EagleProposer:
         assert self.runner is not None
 
         # FIXME: need to consider multiple kv_cache_groups
-        attn_metadata = self.runner.attn_groups[0][0].metadata_builder\
-            .build_for_drafting(common_attn_metadata=common_attn_metadata,
-                                draft_index=0)
+        metadata_builder = self.runner.attn_groups[0][0].metadata_builder
+        attn_metadata = metadata_builder.build_for_drafting(
+            common_attn_metadata=common_attn_metadata,
+            draft_index=0,
+        )
 
         # At this moment, we assume all eagle layers belong to the same KV
         # cache group, thus using the same attention metadata.
@@ -209,6 +298,9 @@ class EagleProposer:
             inputs_embeds = None
             input_ids = self.input_ids[:num_input_tokens]
 
+        intermediate_tensors = self._get_intermediate_tensors(
+            num_input_tokens)
+
         with set_forward_context(per_layer_attn_metadata,
                                  self.vllm_config,
                                  num_tokens=num_input_tokens):
@@ -216,6 +308,7 @@ class EagleProposer:
                 input_ids=input_ids,
                 positions=self.positions[:num_input_tokens],
                 hidden_states=self.hidden_states[:num_input_tokens],
+                intermediate_tensors=intermediate_tensors,
                 inputs_embeds=inputs_embeds,
             )
             if self.method in ("deepseek_mtp", "ernie_mtp", "qwen3_moe_mtp",
@@ -248,11 +341,6 @@ class EagleProposer:
             # [batch_size, 1]
             return draft_token_ids.view(-1, 1)
 
-        # TODO: Currently, MTP module released by deepseek only has
-        # one layer. Adapt this code to support multiple layers once
-        # there's a multi-layer MTP module.
-        assert isinstance(attn_metadata, self.allowed_attn_types)
-
         # Generate the remaining draft tokens.
         draft_token_ids_list = [draft_token_ids]
 
@@ -261,9 +349,6 @@ class EagleProposer:
             input_batch_size = self.vllm_config.pad_for_cudagraph(batch_size)
         else:
             input_batch_size = batch_size
-        attn_metadata.num_actual_tokens = batch_size
-        attn_metadata.max_query_len = 1
-        attn_metadata.query_start_loc = self.arange[:batch_size + 1]
         for _ in range(self.num_speculative_tokens - 1):
             # Update the inputs.
             # cast to int32 is crucial when eagle model is compiled.
@@ -283,28 +368,42 @@ class EagleProposer:
             clamped_positions = torch.where(exceeds_max_model_len, 0,
                                             positions)
 
-            # Increment the sequence lengths.
-            attn_metadata.max_seq_len += 1
-            attn_metadata.seq_lens += 1
-            # Consider max model length.
-            attn_metadata.max_seq_len = min(attn_metadata.max_seq_len,
-                                            self.max_model_len)
-            # For the requests that exceed the max model length, we set the
-            # sequence length to 1 to minimize their overheads in attention.
-            attn_metadata.seq_lens.masked_fill_(exceeds_max_model_len, 1)
-
             # Compute the slot mapping.
             block_numbers = clamped_positions // self.block_size
-            block_ids = attn_metadata.block_table.gather(
+            block_ids = common_attn_metadata.block_table_tensor.gather(
                 dim=1, index=block_numbers.view(-1, 1))
             block_ids = block_ids.view(-1)
-            attn_metadata.slot_mapping = (block_ids * self.block_size +
-                                          clamped_positions % self.block_size)
+            slot_mapping = (block_ids * self.block_size +
+                            clamped_positions % self.block_size)
             # Mask out the slot mappings that exceed the max model length.
             # Otherwise, the KV cache will be inadvertently updated with the
             # padding tokens.
-            attn_metadata.slot_mapping.masked_fill_(exceeds_max_model_len,
-                                                    PADDING_SLOT_ID)
+            slot_mapping.masked_fill_(exceeds_max_model_len, PADDING_SLOT_ID)
+
+            # Rebuild backend-specific attention metadata from the updated
+            # common contract instead of mutating backend-specific fields.
+            seq_lens = common_attn_metadata.seq_lens + 1
+            seq_lens.masked_fill_(exceeds_max_model_len, 1)
+            seq_lens_cpu = common_attn_metadata.seq_lens_cpu + 1
+            seq_lens_cpu.masked_fill_(exceeds_max_model_len.cpu(), 1)
+            common_attn_metadata = replace(
+                common_attn_metadata,
+                query_start_loc=self.arange[:batch_size + 1],
+                query_start_loc_cpu=self.arange_cpu[:batch_size + 1],
+                seq_lens=seq_lens,
+                seq_lens_cpu=seq_lens_cpu,
+                num_actual_tokens=batch_size,
+                max_query_len=1,
+                max_seq_len=min(common_attn_metadata.max_seq_len + 1,
+                                self.max_model_len),
+                slot_mapping=slot_mapping,
+            )
+            attn_metadata = metadata_builder.build_for_drafting(
+                common_attn_metadata=common_attn_metadata,
+                draft_index=0,
+            )
+            for layer_name in self.attn_layer_names:
+                per_layer_attn_metadata[layer_name] = attn_metadata
 
             # copy inputs to buffer for cudagraph
             self.input_ids[:batch_size] = input_ids
@@ -320,6 +419,9 @@ class EagleProposer:
                 input_ids = self.input_ids[:input_batch_size]
 
             # Run the model.
+            intermediate_tensors = self._get_intermediate_tensors(
+                input_batch_size)
+
             with set_forward_context(per_layer_attn_metadata,
                                      self.vllm_config,
                                      num_tokens=input_batch_size):
@@ -327,6 +429,7 @@ class EagleProposer:
                     input_ids=input_ids,
                     positions=self.positions[:input_batch_size],
                     hidden_states=self.hidden_states[:input_batch_size],
+                    intermediate_tensors=intermediate_tensors,
                     inputs_embeds=inputs_embeds,
                 )
                 if self.method in ("deepseek_mtp", "ernie_mtp",
@@ -475,6 +578,9 @@ class EagleProposer:
             else:
                 num_input_tokens = num_tokens
             # Run the model.
+            intermediate_tensors = self._get_intermediate_tensors(
+                num_input_tokens)
+
             with set_forward_context(per_layer_attn_metadata,
                                      self.vllm_config,
                                      num_tokens=num_input_tokens):
@@ -482,6 +588,7 @@ class EagleProposer:
                     input_ids=self.input_ids[:num_input_tokens],
                     positions=self.positions[:num_input_tokens],
                     hidden_states=self.hidden_states[:num_input_tokens],
+                    intermediate_tensors=intermediate_tensors,
                     inputs_embeds=None,
                 )
 
@@ -519,12 +626,13 @@ class EagleProposer:
         common_attn_metadata: CommonAttentionMetadata,
         # [batch_size]
         num_rejected_tokens: torch.Tensor
-    ) -> tuple[CommonAttentionMetadata, torch.Tensor]:
+    ) -> tuple[CommonAttentionMetadata, torch.Tensor, torch.Tensor]:
         """
         This function is used to prepare the inputs for the spec decode.
         It updates to the common_attn_metadata to account for the rejected
         tokens (and newly sampled tokens). It also returns the token indices
-        of the tokens that should be fed to the speculator.
+        of the tokens that should be fed to the speculator, along with the
+        request order required by the draft-attention metadata.
         """
         # E.g.
         #  common_attn_metadata.query_start_loc{_cpu}:
@@ -543,6 +651,10 @@ class EagleProposer:
         #                 q1 + q2, q1 + q2 + 1, ..., q1 + q2 + q3 - n3 - 1]
 
         device = common_attn_metadata.query_start_loc.device
+        runner = getattr(self, "runner", None)
+        reorder_batch_threshold = 1
+        if runner is not None and runner.reorder_batch_threshold is not None:
+            reorder_batch_threshold = runner.reorder_batch_threshold
         query_start_loc_cpu = common_attn_metadata.query_start_loc_cpu
         new_seq_lens_cpu = common_attn_metadata.seq_lens_cpu \
             - num_rejected_tokens
@@ -552,6 +664,21 @@ class EagleProposer:
                                  query_start_loc_cpu[:-1])
         # [q1, q2, q3] -> [q1 - n1, q2 - n2, q3 - n3]
         new_num_tokens_per_req = new_query_len_per_req - num_rejected_tokens
+        request_order = torch.arange(common_attn_metadata.num_reqs,
+                                     dtype=torch.int64)
+        decode_req_mask = new_num_tokens_per_req <= reorder_batch_threshold
+        if torch.any(decode_req_mask) and torch.any(~decode_req_mask):
+            request_order = torch.cat((
+                request_order[decode_req_mask],
+                request_order[~decode_req_mask],
+            ))
+        new_num_tokens_per_req = new_num_tokens_per_req[request_order]
+        new_seq_lens_cpu = new_seq_lens_cpu[request_order]
+        num_computed_tokens_cpu = common_attn_metadata.num_computed_tokens_cpu[
+            request_order]
+        old_query_start_loc_cpu = query_start_loc_cpu[:-1][request_order]
+        block_table_tensor = common_attn_metadata.block_table_tensor[
+            request_order]
         new_num_tokens_per_req_np = new_num_tokens_per_req.numpy()
 
         # [q1 - n1, q2 - n2, q3 - n3] ->
@@ -581,8 +708,8 @@ class EagleProposer:
         # [0, q1, q1 + q2] ->
         # [0, 0, q1, q1, q1, q1, q1 + q2, q1 + q2, q1 + q2]
         #  _r1_  _____r2_______  ___________r3____________
-        old_query_start_locs_expanded = np.repeat(
-            query_start_loc_cpu[:-1].numpy(), new_num_tokens_per_req_np)
+        old_query_start_locs_expanded = np.repeat(old_query_start_loc_cpu.numpy(),
+                                                  new_num_tokens_per_req_np)
         # Final token indices are:
         # [0, 1,                                // req 1
         #  q1 + 0, q1 + 1, q1 + 2, q1 + 3,       // req 2
@@ -597,18 +724,17 @@ class EagleProposer:
             seq_lens=new_seq_lens_cpu.to(device, non_blocking=True),
             query_start_loc_cpu=new_query_start_loc_cpu,
             seq_lens_cpu=new_seq_lens_cpu,
-            num_computed_tokens_cpu=common_attn_metadata.
-            num_computed_tokens_cpu,
+            num_computed_tokens_cpu=num_computed_tokens_cpu,
             num_reqs=common_attn_metadata.num_reqs,
             num_actual_tokens=total_num_tokens,
-            max_query_len=new_query_len_per_req.max().item(),
+            max_query_len=int(new_num_tokens_per_req.max().item()),
             max_seq_len=new_seq_lens_cpu.max().item(),
-            block_table_tensor=common_attn_metadata.block_table_tensor,
+            block_table_tensor=block_table_tensor,
             slot_mapping=common_attn_metadata.slot_mapping[token_indices],
             causal=True,
         )
 
-        return spec_common_attn_metadata, token_indices
+        return spec_common_attn_metadata, token_indices, request_order
 
     def load_model(self, target_model: nn.Module) -> None:
         draft_model_config = \
@@ -671,10 +797,13 @@ class EagleProposer:
                 input_ids = self.input_ids[:num_tokens]
                 inputs_embeds = None
 
+            intermediate_tensors = self._get_intermediate_tensors(num_tokens)
+
             self.model(
                 input_ids=input_ids,
                 positions=self.positions[:num_tokens],
                 hidden_states=self.hidden_states[:num_tokens],
+                intermediate_tensors=intermediate_tensors,
                 inputs_embeds=inputs_embeds,
             )
 
