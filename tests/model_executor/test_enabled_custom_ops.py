@@ -7,7 +7,8 @@ import pytest
 import torch
 
 import vllm._custom_ops as custom_ops
-from vllm.config import CompilationConfig, VllmConfig, set_current_vllm_config
+from vllm.config import (CompilationConfig, DeviceConfig, VllmConfig,
+                         set_current_vllm_config)
 from vllm.model_executor.custom_op import CustomOp
 from vllm.model_executor.layers.activation import (GeluAndMul,
                                                    ReLUSquaredActivation,
@@ -73,6 +74,7 @@ class Relu3(ReLUSquaredActivation):
 def test_enabled_ops(env: str, torch_level: int, use_inductor: bool,
                      ops_enabled: list[int], default_on: bool):
     vllm_config = VllmConfig(
+        device_config=DeviceConfig(device="cpu"),
         compilation_config=CompilationConfig(use_inductor=bool(use_inductor),
                                              level=torch_level,
                                              custom_ops=env.split(",")))
@@ -107,7 +109,8 @@ def test_enabled_ops(env: str, torch_level: int, use_inductor: bool,
 def test_enabled_ops_invalid(env: str):
     with pytest.raises(Exception):  # noqa
         vllm_config = VllmConfig(compilation_config=CompilationConfig(
-            custom_ops=env.split(",")))
+            custom_ops=env.split(",")),
+                                 device_config=DeviceConfig(device="cpu"))
         with set_current_vllm_config(vllm_config):
             RMSNorm(1024).enabled()
 
