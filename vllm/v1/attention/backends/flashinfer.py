@@ -40,7 +40,9 @@ from vllm.v1.attention.backends.utils import (AttentionCGSupport,
                                               split_decodes_and_prefills)
 # yapf: enable
 from vllm.v1.kv_cache_interface import AttentionSpec
-from vllm.v1.utils import record_function_or_nullcontext
+from vllm.v1.utils import (record_frontier_op_meta,
+                           record_function_or_nullcontext,
+                           should_record_frontier_op_meta)
 
 FLASHINFER_WORKSPACE_BUFFER_SIZE = 256 * 1024 * 1024
 
@@ -701,6 +703,66 @@ class FlashInferImpl(AttentionImpl):
                 and self.kv_cache_dtype.startswith("fp8")
                 and quant_key in (kFp8StaticTensorSym, kNvfp4Quant))
 
+    def _build_frontier_attention_meta(
+        self,
+        layer: torch.nn.Module,
+        attn_metadata: FlashInferMetadata,
+        max_seqlen_q: int | None = None,
+        num_actual_tokens: int | None = None,
+    ) -> dict[str, object]:
+        attn_module_sliding_window = getattr(layer, "sliding_window", None)
+        if attn_module_sliding_window is None:
+            kv_cache_spec_type = "FullAttentionSpec"
+        else:
+            kv_cache_spec_type = "SlidingWindowSpec"
+        if max_seqlen_q is None:
+            max_seqlen_q = attn_metadata.max_q_len
+        if num_actual_tokens is None:
+            num_actual_tokens = attn_metadata.num_actual_tokens
+
+        return {
+            "module": "FlashInferImpl.forward",
+            "attention_backend": FlashInferBackend.get_name(),
+            "head_dim": self.head_size,
+            "num_q_heads": self.num_heads,
+            "num_kv_heads": self.num_kv_heads,
+            "kv_cache_dtype": self.kv_cache_dtype,
+            "calculate_kv_scales": bool(
+                getattr(layer, "calculate_kv_scales", False)),
+            "attn_module_sliding_window": attn_module_sliding_window,
+            "flashinfer_window_left": self.window_left,
+            "flashinfer_window_size": self.sliding_window,
+            "kv_cache_spec_type": kv_cache_spec_type,
+            "max_seqlen_q": int(max_seqlen_q),
+            "max_seqlen_k": int(attn_metadata.max_seq_len),
+            "num_actual_tokens": int(num_actual_tokens),
+            "num_decode_tokens": int(attn_metadata.num_decode_tokens),
+            "num_prefill_tokens": int(attn_metadata.num_prefill_tokens),
+            "prefill_use_trtllm": bool(attn_metadata.prefill_use_trtllm),
+            "decode_use_trtllm": bool(attn_metadata.decode_use_trtllm),
+            "use_cascade": bool(attn_metadata.use_cascade),
+        }
+
+    def _record_frontier_attention_meta(
+        self,
+        op_name: str,
+        layer: torch.nn.Module,
+        attn_metadata: FlashInferMetadata,
+        max_seqlen_q: int | None = None,
+        num_actual_tokens: int | None = None,
+    ) -> None:
+        if not should_record_frontier_op_meta(op_name):
+            return
+        record_frontier_op_meta(
+            op_name,
+            self._build_frontier_attention_meta(
+                layer,
+                attn_metadata,
+                max_seqlen_q=max_seqlen_q,
+                num_actual_tokens=num_actual_tokens,
+            ),
+        )
+
     def forward(
         self,
         layer: torch.nn.Module,
@@ -797,6 +859,8 @@ class FlashInferImpl(AttentionImpl):
             # op uses the slot_mapping's shape to determine the number of
             # actual tokens.
             with record_function_or_nullcontext("attn_kv_cache_save"):
+                self._record_frontier_attention_meta(
+                    "attn_kv_cache_save", layer, attn_metadata)
                 torch.ops._C_cache_ops.reshape_and_cache_flash(
                     key,
                     value,
@@ -847,6 +911,12 @@ class FlashInferImpl(AttentionImpl):
                     self.logits_soft_cap or 0.0)
                 assert prefill_wrapper._sm_scale == self.scale
                 with record_function_or_nullcontext("attn_prefill"):
+                    self._record_frontier_attention_meta(
+                        "attn_prefill",
+                        layer,
+                        attn_metadata,
+                        num_actual_tokens=num_prefill_tokens,
+                    )
                     prefill_wrapper.run(
                         prefill_query,
                         kv_cache_permute,
@@ -899,6 +969,12 @@ class FlashInferImpl(AttentionImpl):
                     mock_block_table = block_tables_prefill
 
                 with record_function_or_nullcontext("attn_prefill"):
+                    self._record_frontier_attention_meta(
+                        "attn_prefill",
+                        layer,
+                        attn_metadata,
+                        num_actual_tokens=num_prefill_tokens,
+                    )
                     trtllm_batch_context_with_kv_cache(
                         query=prefill_query,
                         kv_cache=mock_kv_cache,
@@ -930,6 +1006,13 @@ class FlashInferImpl(AttentionImpl):
                                                            or 0.0)
                 assert decode_wrapper._sm_scale == self.scale
                 with record_function_or_nullcontext("attn_decode"):
+                    self._record_frontier_attention_meta(
+                        "attn_decode",
+                        layer,
+                        attn_metadata,
+                        max_seqlen_q=1,
+                        num_actual_tokens=num_decode_tokens,
+                    )
                     decode_wrapper.run(
                         decode_query,
                         kv_cache_permute,
@@ -964,6 +1047,13 @@ class FlashInferImpl(AttentionImpl):
                     out = output[:num_decode_tokens]
 
                 with record_function_or_nullcontext("attn_decode"):
+                    self._record_frontier_attention_meta(
+                        "attn_decode",
+                        layer,
+                        attn_metadata,
+                        max_seqlen_q=1,
+                        num_actual_tokens=num_decode_tokens,
+                    )
                     trtllm_batch_decode_with_kv_cache(
                         query=decode_query,
                         kv_cache=kv_cache_permute,

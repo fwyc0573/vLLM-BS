@@ -80,6 +80,8 @@ def moe_align_block_size(
                                       device=topk_ids.device)
 
     ops.moe_align_block_size(topk_ids, num_experts, block_size, sorted_ids,
-                             expert_ids, num_tokens_post_pad, expert_map)
+                             expert_ids, num_tokens_post_pad)
+    if expert_map is not None:
+        expert_ids = expert_map[expert_ids]
 
     return sorted_ids, expert_ids, num_tokens_post_pad

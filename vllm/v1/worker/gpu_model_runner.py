@@ -157,6 +157,10 @@ def _frontier_instrumentation_requires_flashinfer(
     return cuda_event_op_log_enabled or moe_routing_log_enabled
 
 
+def _frontier_backend_supports_cuda_event_op_logging(backend_name: str) -> bool:
+    return "FLASHINFER" in backend_name or "FLASH_ATTN" in backend_name
+
+
 def _build_mixed_batch_dummy_layout(
     num_tokens: int,
     max_num_reqs: int,
@@ -3640,17 +3644,20 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 raise RuntimeError(
                     "Frontier instrumentation requires initialized attention backends."
                 )
+            cuda_event_unsupported_backends = sorted(
+                name for name in backend_names
+                if not _frontier_backend_supports_cuda_event_op_logging(name))
+            if (cuda_event_unsupported_backends
+                    and FRONTIER_CUDA_EVENT_OP_LOG_ENABLED):
+                raise RuntimeError(
+                    "Frontier CUDA event per-op logging requires FlashInfer or FlashAttention backend. "
+                    f"Detected: {', '.join(sorted(backend_names))}."
+                )
             non_flashinfer = sorted(
                 name for name in backend_names if "FLASHINFER" not in name)
-            if (non_flashinfer and _frontier_instrumentation_requires_flashinfer(
-                    batch_log_enabled=FRONTIER_BATCH_LOG_ENABLED,
-                    cuda_event_op_log_enabled=
-                    FRONTIER_CUDA_EVENT_OP_LOG_ENABLED,
-                    moe_routing_log_enabled=
-                    FRONTIER_MOE_ROUTING_LOG_ENABLED,
-            )):
+            if non_flashinfer and FRONTIER_MOE_ROUTING_LOG_ENABLED:
                 raise RuntimeError(
-                    "Frontier per-op / MoE routing instrumentation requires FlashInfer attention backend. "
+                    "Frontier MoE routing instrumentation requires FlashInfer attention backend. "
                     f"Detected: {', '.join(sorted(backend_names))}. "
                     "Set VLLM_ATTENTION_BACKEND=FLASHINFER or FLASHINFER_VLLM_V1."
                 )

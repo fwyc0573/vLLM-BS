@@ -219,6 +219,9 @@ from vllm.v1.attention.backends.utils import (AttentionMetadataBuilder,
                                               infer_global_hyperparameters,
                                               split_decodes_and_prefills)
 from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.utils import (record_frontier_op_meta,
+                           record_function_or_nullcontext,
+                           should_record_frontier_op_meta)
 
 try:
     from vllm.vllm_flash_attn import flash_attn_varlen_func
@@ -395,6 +398,7 @@ class MLACommonMetadata(Generic[D]):
 
     # The dimension of the attention heads
     head_dim: Optional[int] = None
+    block_size: Optional[int] = None
 
     decode: Optional[D] = None
     prefill: Optional[Union[MLACommonPrefillMetadata,
@@ -837,6 +841,7 @@ class MLACommonMetadataBuilder(AttentionMetadataBuilder[M]):
             query_start_loc=query_start_loc,
             slot_mapping=slot_mapping,
             head_dim=self.model_config.get_head_size(),
+            block_size=self.kv_cache_spec.block_size,
             # MLACommonMetadata Chunk prefill specific
             num_decodes=num_decodes,
             num_decode_tokens=num_decode_tokens,
@@ -952,6 +957,10 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
         self.scale = float(scale)
         self.num_kv_heads = num_kv_heads
         self.kv_cache_dtype = kv_cache_dtype
+        self.alibi_slopes = alibi_slopes
+        self.sliding_window = sliding_window
+        self.logits_soft_cap = logits_soft_cap
+        self.attn_type = attn_type
 
         self.q_lora_rank = q_lora_rank
         self.kv_lora_rank = kv_lora_rank
@@ -997,6 +1006,65 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
                 and current_platform.get_device_capability()[0] == 9)
 
         self.dcp_world_size: Optional[int] = None
+
+    def _build_frontier_mla_meta(
+        self,
+        layer: AttentionLayer,
+        attn_metadata: M,
+        max_seqlen_q: int | None = None,
+        num_actual_tokens: int | None = None,
+    ) -> dict[str, object]:
+        if max_seqlen_q is None:
+            max_seqlen_q = attn_metadata.max_query_len
+        if num_actual_tokens is None:
+            num_actual_tokens = attn_metadata.num_actual_tokens
+        return {
+            "module": "MLACommonImpl.forward",
+            "attention_backend": "FLASHINFER_MLA",
+            "use_mla": True,
+            "runtime_num_kv_heads": 1,
+            "runtime_head_size": self.kv_lora_rank + self.qk_rope_head_dim,
+            "kv_lora_rank": self.kv_lora_rank,
+            "qk_nope_head_dim": self.qk_nope_head_dim,
+            "qk_rope_head_dim": self.qk_rope_head_dim,
+            "qk_head_dim": self.qk_head_dim,
+            "v_head_dim": self.v_head_dim,
+            "block_size": int(attn_metadata.block_size or 0),
+            "kv_cache_dtype": self.kv_cache_dtype,
+            "calculate_kv_scales": bool(
+                getattr(layer, "calculate_kv_scales", False)),
+            "attn_module_sliding_window": self.sliding_window,
+            "alibi_slopes": self.alibi_slopes,
+            "logits_soft_cap": self.logits_soft_cap,
+            "attn_type": self.attn_type,
+            "max_seqlen_q": int(max_seqlen_q),
+            "max_seqlen_k": int(attn_metadata.max_seq_len),
+            "num_actual_tokens": int(num_actual_tokens),
+            "num_decode_tokens": int(attn_metadata.num_decode_tokens),
+            "num_prefill_tokens": int(
+                attn_metadata.num_actual_tokens
+                - attn_metadata.num_decode_tokens),
+        }
+
+    def _record_frontier_mla_meta(
+        self,
+        op_name: str,
+        layer: AttentionLayer,
+        attn_metadata: M,
+        max_seqlen_q: int | None = None,
+        num_actual_tokens: int | None = None,
+    ) -> None:
+        if not should_record_frontier_op_meta(op_name):
+            return
+        record_frontier_op_meta(
+            op_name,
+            self._build_frontier_mla_meta(
+                layer,
+                attn_metadata,
+                max_seqlen_q=max_seqlen_q,
+                num_actual_tokens=num_actual_tokens,
+            ),
+        )
 
     def _flash_attn_varlen_diff_headdims(self,
                                          q,
@@ -1424,46 +1492,62 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
         kv_c_and_k_pe_cache: torch.Tensor,
         attn_metadata: MLACommonMetadata,
         k_scale: torch.Tensor,
+        layer: AttentionLayer,
     ) -> torch.Tensor:
         assert attn_metadata.prefill is not None
         assert self.dcp_world_size is not None
 
         has_context = attn_metadata.prefill.chunked_context is not None
-        kv_nope = self.kv_b_proj(kv_c_normed)[0].view(\
-            -1, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
+        with record_function_or_nullcontext("attn_mla_prefill_kv_up_proj"):
+            self._record_frontier_mla_meta(
+                "attn_mla_prefill_kv_up_proj",
+                layer,
+                attn_metadata,
+                num_actual_tokens=kv_c_normed.shape[0],
+            )
+            kv_nope = self.kv_b_proj(kv_c_normed)[0].view(\
+                -1, self.num_heads, self.qk_nope_head_dim + self.v_head_dim)
         k_nope, v = kv_nope\
             .split([self.qk_nope_head_dim, self.v_head_dim], dim=-1)
 
         k = torch.cat((k_nope, k_pe.expand((*k_nope.shape[:-1], -1))), dim=-1)
 
-        output = self._run_prefill_new_tokens(
-            prefill=attn_metadata.prefill,
-            q=q,
-            k=k,
-            v=v,
-            return_softmax_lse=has_context,
-        )
-
-        if has_context:
-            suffix_output, suffix_lse = output
-            if self.dcp_world_size > 1:
-                context_output, context_lse = \
-                    self._context_parallel_compute_prefill_context(
-                    q, kv_c_and_k_pe_cache, attn_metadata,
-                    k_scale=None, dcp_world_size=self.dcp_world_size)
-            else:
-                context_output, context_lse = \
-                    self._compute_prefill_context(
-                    q, kv_c_and_k_pe_cache, attn_metadata, k_scale)
-
-            output = torch.empty_like(suffix_output)
-            merge_attn_states(
-                output=output,
-                prefix_output=context_output,
-                prefix_lse=context_lse,
-                suffix_output=suffix_output,
-                suffix_lse=suffix_lse,
+        with record_function_or_nullcontext("attn_mla_prefill"):
+            self._record_frontier_mla_meta(
+                "attn_mla_prefill",
+                layer,
+                attn_metadata,
+                max_seqlen_q=attn_metadata.prefill.max_query_len,
+                num_actual_tokens=q.shape[0],
             )
+            output = self._run_prefill_new_tokens(
+                prefill=attn_metadata.prefill,
+                q=q,
+                k=k,
+                v=v,
+                return_softmax_lse=has_context,
+            )
+
+            if has_context:
+                suffix_output, suffix_lse = output
+                if self.dcp_world_size > 1:
+                    context_output, context_lse = \
+                        self._context_parallel_compute_prefill_context(
+                        q, kv_c_and_k_pe_cache, attn_metadata,
+                        k_scale=None, dcp_world_size=self.dcp_world_size)
+                else:
+                    context_output, context_lse = \
+                        self._compute_prefill_context(
+                        q, kv_c_and_k_pe_cache, attn_metadata, k_scale)
+
+                output = torch.empty_like(suffix_output)
+                merge_attn_states(
+                    output=output,
+                    prefix_output=context_output,
+                    prefix_lse=context_lse,
+                    suffix_output=suffix_output,
+                    suffix_lse=suffix_lse,
+                )
 
         # unpad if necessary
         if self._pad_v:
@@ -1536,14 +1620,20 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
 
         # write the latent and rope to kv cache
         if kv_cache.numel() > 0:
-            ops.concat_and_cache_mla(
-                k_c_normed,
-                k_pe.squeeze(1),
-                kv_cache,
-                attn_metadata.slot_mapping.flatten(),
-                kv_cache_dtype=self.kv_cache_dtype,
-                scale=layer._k_scale,
-            )
+            with record_function_or_nullcontext("attn_mla_kv_cache_save"):
+                self._record_frontier_mla_meta(
+                    "attn_mla_kv_cache_save",
+                    layer,
+                    attn_metadata,
+                )
+                ops.concat_and_cache_mla(
+                    k_c_normed,
+                    k_pe.squeeze(1),
+                    kv_cache,
+                    attn_metadata.slot_mapping.flatten(),
+                    kv_cache_dtype=self.kv_cache_dtype,
+                    scale=layer._k_scale,
+                )
 
         if fp8_attention:
             kv_cache = kv_cache.view(current_platform.fp8_dtype())
@@ -1551,7 +1641,7 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
         if has_prefill:
             output[num_decode_tokens:] = self._forward_prefill(
                 prefill_q, prefill_k_c_normed, prefill_k_pe, kv_cache,
-                attn_metadata, layer._k_scale)
+                attn_metadata, layer._k_scale, layer)
 
         if has_decode:
             assert attn_metadata.decode is not None
@@ -1560,18 +1650,26 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
             # Convert from (B, N, P) to (N, B, P)
             decode_q_nope = decode_q_nope.transpose(0, 1)
 
-            if is_rocm_aiter_fp8bmm_enabled():
-                # Multiply+Transpose (N, B, P)x(N, P, L)->(N, B, L)->(B, N, L)
-                decode_ql_nope = aiter_triton_fp8_bmm(decode_q_nope,
-                                                      self.W_K,
-                                                      self.W_K_scale,
-                                                      group_size=128,
-                                                      transpose_bm=True)
-            else:
-                # Multiply (N, B, P) x (N, P, L) -> (N, B, L)
-                decode_ql_nope = torch.bmm(decode_q_nope, self.W_UK_T)
-                # Convert from (N, B, L) to (B, N, L)
-                decode_ql_nope = decode_ql_nope.transpose(0, 1)
+            with record_function_or_nullcontext("attn_mla_decode_q_latent_proj"):
+                self._record_frontier_mla_meta(
+                    "attn_mla_decode_q_latent_proj",
+                    layer,
+                    attn_metadata,
+                    max_seqlen_q=1,
+                    num_actual_tokens=num_decode_tokens,
+                )
+                if is_rocm_aiter_fp8bmm_enabled():
+                    # Multiply+Transpose (N, B, P)x(N, P, L)->(N, B, L)->(B, N, L)
+                    decode_ql_nope = aiter_triton_fp8_bmm(decode_q_nope,
+                                                          self.W_K,
+                                                          self.W_K_scale,
+                                                          group_size=128,
+                                                          transpose_bm=True)
+                else:
+                    # Multiply (N, B, P) x (N, P, L) -> (N, B, L)
+                    decode_ql_nope = torch.bmm(decode_q_nope, self.W_UK_T)
+                    # Convert from (N, B, L) to (B, N, L)
+                    decode_ql_nope = decode_ql_nope.transpose(0, 1)
 
             if fp8_attention:
                 ql_nope_shape = decode_ql_nope.shape
@@ -1596,13 +1694,29 @@ class MLACommonImpl(MLAAttentionImpl[M], Generic[M]):
                 decode_q = get_dcp_group().all_gather(decode_q, dim=1)
 
             # call decode attn
-            attn_out, lse = self._forward_decode(decode_q, kv_cache,
-                                                 attn_metadata, layer)
+            with record_function_or_nullcontext("attn_mla_decode"):
+                self._record_frontier_mla_meta(
+                    "attn_mla_decode",
+                    layer,
+                    attn_metadata,
+                    max_seqlen_q=1,
+                    num_actual_tokens=num_decode_tokens,
+                )
+                attn_out, lse = self._forward_decode(decode_q, kv_cache,
+                                                     attn_metadata, layer)
 
             # recorect dcp attn_out with lse.
             if self.dcp_world_size > 1:
                 attn_out = cp_lse_ag_out_rs(attn_out, lse, get_dcp_group())
 
             # v_up projection
-            output[:num_decode_tokens] = self._v_up_proj(attn_out)
+            with record_function_or_nullcontext("attn_mla_v_up_proj"):
+                self._record_frontier_mla_meta(
+                    "attn_mla_v_up_proj",
+                    layer,
+                    attn_metadata,
+                    max_seqlen_q=1,
+                    num_actual_tokens=num_decode_tokens,
+                )
+                output[:num_decode_tokens] = self._v_up_proj(attn_out)
         return output_padded

@@ -31,6 +31,9 @@ from vllm.v1.attention.backends.utils import (AttentionCGSupport,
                                               CommonAttentionMetadata,
                                               get_kv_cache_layout)
 from vllm.v1.kv_cache_interface import AttentionSpec
+from vllm.v1.utils import (record_frontier_op_meta,
+                           record_function_or_nullcontext,
+                           should_record_frontier_op_meta)
 
 logger = init_logger(__name__)
 
@@ -451,6 +454,48 @@ class FlashAttentionImpl(AttentionImpl):
                 "Sinks must have the same number of heads as the number of "
                 "heads in the layer")
 
+    def _build_frontier_attention_meta(
+        self,
+        layer: torch.nn.Module,
+        attn_metadata: FlashAttentionMetadata,
+    ) -> dict[str, object]:
+        attn_module_sliding_window = getattr(layer, "sliding_window", None)
+        if attn_module_sliding_window is None:
+            kv_cache_spec_type = "FullAttentionSpec"
+        else:
+            kv_cache_spec_type = "SlidingWindowSpec"
+
+        return {
+            "module": "FlashAttentionImpl.forward",
+            "attention_backend": FlashAttentionBackend.get_name(),
+            "head_dim": self.head_size,
+            "num_q_heads": self.num_heads,
+            "num_kv_heads": self.num_kv_heads,
+            "kv_cache_dtype": self.kv_cache_dtype,
+            "calculate_kv_scales": bool(
+                getattr(layer, "calculate_kv_scales", False)),
+            "attn_module_sliding_window": attn_module_sliding_window,
+            "flash_attention_window_size": self.sliding_window,
+            "kv_cache_spec_type": kv_cache_spec_type,
+            "max_seqlen_q": int(attn_metadata.max_query_len),
+            "max_seqlen_k": int(attn_metadata.max_seq_len),
+            "num_actual_tokens": int(attn_metadata.num_actual_tokens),
+            "use_cascade": bool(attn_metadata.use_cascade),
+        }
+
+    def _record_frontier_attention_meta(
+        self,
+        op_name: str,
+        layer: torch.nn.Module,
+        attn_metadata: FlashAttentionMetadata,
+    ) -> None:
+        if not should_record_frontier_op_meta(op_name):
+            return
+        record_frontier_op_meta(
+            op_name,
+            self._build_frontier_attention_meta(layer, attn_metadata),
+        )
+
     def forward(
         self,
         layer: torch.nn.Module,
@@ -527,16 +572,19 @@ class FlashAttentionImpl(AttentionImpl):
             # and value[:num_actual_tokens] because the reshape_and_cache_flash
             # op uses the slot_mapping's shape to determine the number of
             # actual tokens.
-            reshape_and_cache_flash(
-                key,
-                value,
-                key_cache,
-                value_cache,
-                attn_metadata.slot_mapping,
-                self.kv_cache_dtype,
-                layer._k_scale,
-                layer._v_scale,
-            )
+            with record_function_or_nullcontext("attn_kv_cache_save"):
+                self._record_frontier_attention_meta(
+                    "attn_kv_cache_save", layer, attn_metadata)
+                reshape_and_cache_flash(
+                    key,
+                    value,
+                    key_cache,
+                    value_cache,
+                    attn_metadata.slot_mapping,
+                    self.kv_cache_dtype,
+                    layer._k_scale,
+                    layer._v_scale,
+                )
 
         if self.kv_cache_dtype.startswith("fp8"):
             dtype = FlashAttentionBackend.get_fp8_dtype_for_flashattn(
@@ -560,56 +608,68 @@ class FlashAttentionImpl(AttentionImpl):
 
             descale_shape = (cu_seqlens_q.shape[0] - 1, self.num_kv_heads)
 
-            flash_attn_varlen_func(
-                q=query[:num_actual_tokens],
-                k=key_cache,
-                v=value_cache,
-                out=output[:num_actual_tokens],
-                cu_seqlens_q=cu_seqlens_q,
-                max_seqlen_q=max_seqlen_q,
-                seqused_k=seqused_k,
-                max_seqlen_k=max_seqlen_k,
-                softmax_scale=self.scale,
-                causal=attn_metadata.causal,
-                alibi_slopes=self.alibi_slopes,
-                window_size=self.sliding_window,
-                block_table=block_table,
-                softcap=self.logits_soft_cap,
-                scheduler_metadata=scheduler_metadata,
-                fa_version=self.vllm_flash_attn_version,
-                q_descale=layer._q_scale.expand(descale_shape),
-                k_descale=layer._k_scale.expand(descale_shape),
-                v_descale=layer._v_scale.expand(descale_shape),
-                num_splits=attn_metadata.max_num_splits,
-                s_aux=self.sinks,
-            )
+            if max_seqlen_q == 1:
+                attention_op_name = "attn_decode"
+                attention_context = record_function_or_nullcontext("attn_decode")
+            else:
+                attention_op_name = "attn_prefill"
+                attention_context = record_function_or_nullcontext("attn_prefill")
+            with attention_context:
+                self._record_frontier_attention_meta(
+                    attention_op_name, layer, attn_metadata)
+                flash_attn_varlen_func(
+                    q=query[:num_actual_tokens],
+                    k=key_cache,
+                    v=value_cache,
+                    out=output[:num_actual_tokens],
+                    cu_seqlens_q=cu_seqlens_q,
+                    max_seqlen_q=max_seqlen_q,
+                    seqused_k=seqused_k,
+                    max_seqlen_k=max_seqlen_k,
+                    softmax_scale=self.scale,
+                    causal=attn_metadata.causal,
+                    alibi_slopes=self.alibi_slopes,
+                    window_size=self.sliding_window,
+                    block_table=block_table,
+                    softcap=self.logits_soft_cap,
+                    scheduler_metadata=scheduler_metadata,
+                    fa_version=self.vllm_flash_attn_version,
+                    q_descale=layer._q_scale.expand(descale_shape),
+                    k_descale=layer._k_scale.expand(descale_shape),
+                    v_descale=layer._v_scale.expand(descale_shape),
+                    num_splits=attn_metadata.max_num_splits,
+                    s_aux=self.sinks,
+                )
             return output
 
         # Cascade attention (rare case).
-        cascade_attention(
-            output[:num_actual_tokens],
-            query[:num_actual_tokens],
-            key_cache,
-            value_cache,
-            cu_query_lens=attn_metadata.query_start_loc,
-            max_query_len=attn_metadata.max_query_len,
-            cu_prefix_query_lens=attn_metadata.cu_prefix_query_lens,
-            prefix_kv_lens=attn_metadata.prefix_kv_lens,
-            suffix_kv_lens=attn_metadata.suffix_kv_lens,
-            max_kv_len=attn_metadata.max_seq_len,
-            softmax_scale=self.scale,
-            alibi_slopes=self.alibi_slopes,
-            sliding_window=self.sliding_window,
-            logits_soft_cap=self.logits_soft_cap,
-            block_table=attn_metadata.block_table,
-            common_prefix_len=attn_metadata.common_prefix_len,
-            fa_version=self.vllm_flash_attn_version,
-            prefix_scheduler_metadata=attn_metadata.prefix_scheduler_metadata,
-            suffix_scheduler_metadata=attn_metadata.scheduler_metadata,
-            q_descale=layer._q_scale,
-            k_descale=layer._k_scale,
-            v_descale=layer._v_scale,
-        )
+        with record_function_or_nullcontext("attn_prefill"):
+            self._record_frontier_attention_meta(
+                "attn_prefill", layer, attn_metadata)
+            cascade_attention(
+                output[:num_actual_tokens],
+                query[:num_actual_tokens],
+                key_cache,
+                value_cache,
+                cu_query_lens=attn_metadata.query_start_loc,
+                max_query_len=attn_metadata.max_query_len,
+                cu_prefix_query_lens=attn_metadata.cu_prefix_query_lens,
+                prefix_kv_lens=attn_metadata.prefix_kv_lens,
+                suffix_kv_lens=attn_metadata.suffix_kv_lens,
+                max_kv_len=attn_metadata.max_seq_len,
+                softmax_scale=self.scale,
+                alibi_slopes=self.alibi_slopes,
+                sliding_window=self.sliding_window,
+                logits_soft_cap=self.logits_soft_cap,
+                block_table=attn_metadata.block_table,
+                common_prefix_len=attn_metadata.common_prefix_len,
+                fa_version=self.vllm_flash_attn_version,
+                prefix_scheduler_metadata=attn_metadata.prefix_scheduler_metadata,
+                suffix_scheduler_metadata=attn_metadata.scheduler_metadata,
+                q_descale=layer._q_scale,
+                k_descale=layer._k_scale,
+                v_descale=layer._v_scale,
+            )
         return output
 
     def _forward_encoder_attention(

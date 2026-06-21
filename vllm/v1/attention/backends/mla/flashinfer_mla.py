@@ -4,7 +4,7 @@
 from typing import Optional, Union
 
 import torch
-from flashinfer.decode import trtllm_batch_decode_with_kv_cache_mla
+from flashinfer.mla import BatchMLAPagedAttentionWrapper
 
 from vllm.attention.backends.abstract import (AttentionLayer, AttentionType,
                                               is_quantized_kv_cache)
@@ -74,6 +74,43 @@ class FlashInferMLAImpl(MLACommonImpl[MLACommonMetadata]):
                 "FlashInferMLA V1 with FP8 KV cache not yet supported")
 
         self._workspace_buffer = g_fi_workspace
+        self._decode_wrapper: Optional[BatchMLAPagedAttentionWrapper] = None
+
+    def _get_decode_wrapper(self) -> BatchMLAPagedAttentionWrapper:
+        if self._decode_wrapper is None:
+            self._decode_wrapper = BatchMLAPagedAttentionWrapper(
+                self._workspace_buffer,
+                backend="auto",
+            )
+        return self._decode_wrapper
+
+    @staticmethod
+    def _build_decode_page_indices(
+        block_table: torch.Tensor,
+        seq_lens: torch.Tensor,
+        page_size: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        device = seq_lens.device
+        seq_lens = seq_lens.to(dtype=torch.int32)
+        block_table = block_table.to(device=device, dtype=torch.int32)
+
+        blocks_per_req = torch.div(
+            seq_lens + page_size - 1,
+            page_size,
+            rounding_mode="floor",
+        )
+        page_offsets = torch.arange(
+            block_table.size(1),
+            dtype=torch.int32,
+            device=device,
+        ).unsqueeze(0)
+        page_mask = page_offsets < blocks_per_req.unsqueeze(1)
+        kv_indices = block_table[page_mask].contiguous()
+        kv_indptr = torch.cat([
+            torch.zeros(1, dtype=torch.int32, device=device),
+            blocks_per_req.cumsum(dim=0, dtype=torch.int32),
+        ])
+        return kv_indptr, kv_indices, seq_lens
 
     def _forward_decode(
         self,
@@ -87,24 +124,53 @@ class FlashInferMLAImpl(MLACommonImpl[MLACommonMetadata]):
 
         if isinstance(q, tuple):
             q_nope, q_pe = q
-            q = torch.cat([q_nope, q_pe], dim=-1)
+        else:
+            q_nope, q_pe = q.split(
+                [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
 
-        # trtllm API requires extra dimension q_len_per_request for MTP
-        q = q.unsqueeze(1)
+        if q_nope.shape[0] != attn_metadata.decode.seq_lens.numel():
+            raise NotImplementedError(
+                "FlashInfer MLA BatchMLAPagedAttentionWrapper decode path "
+                "expects exactly one decode query token per request.")
 
-        o = trtllm_batch_decode_with_kv_cache_mla(
-            query=q,
-            kv_cache=kv_c_and_k_pe_cache.unsqueeze(1),
-            workspace_buffer=self._workspace_buffer,
-            qk_nope_head_dim=self.qk_nope_head_dim,
-            kv_lora_rank=self.kv_lora_rank,
-            qk_rope_head_dim=self.qk_rope_head_dim,
-            block_tables=attn_metadata.decode.block_table,
-            seq_lens=attn_metadata.decode.seq_lens,
-            max_seq_len=attn_metadata.max_seq_len,
-            bmm1_scale=self.scale,
+        page_size = kv_c_and_k_pe_cache.size(1)
+        kv_indptr, kv_indices, kv_len_arr = self._build_decode_page_indices(
+            attn_metadata.decode.block_table,
+            attn_metadata.decode.seq_lens,
+            page_size,
+        )
+        qo_indptr = torch.arange(
+            0,
+            q_nope.shape[0] + 1,
+            dtype=torch.int32,
+            device=q_nope.device,
         )
 
-        # TODO: Return LSE pending support from Flashinfer API:
-        # https://github.com/flashinfer-ai/flashinfer/pull/1566
+        kv_c_cache = kv_c_and_k_pe_cache[..., :self.kv_lora_rank]
+        k_pe_cache = kv_c_and_k_pe_cache[..., self.kv_lora_rank:]
+
+        decode_wrapper = self._get_decode_wrapper()
+        decode_wrapper.plan(
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_len_arr,
+            self.num_heads,
+            self.kv_lora_rank,
+            self.qk_rope_head_dim,
+            page_size,
+            False,
+            self.scale,
+            q_nope.dtype,
+            kv_c_cache.dtype,
+        )
+
+        o = decode_wrapper.run(
+            q_nope,
+            q_pe,
+            kv_c_cache,
+            k_pe_cache,
+            return_lse=False,
+        )
+
         return o, None
