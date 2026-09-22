@@ -45,6 +45,7 @@ from vllm.v1.engine.utils import (EngineHandshakeMetadata, EngineZmqAddresses,
 from vllm.v1.executor.abstract import Executor
 from vllm.v1.kv_cache_interface import KVCacheConfig
 from vllm.v1.metrics.stats import SchedulerStats
+from vllm.v1 import frontier_trace
 from vllm.v1.outputs import ModelRunnerOutput
 from vllm.v1.request import Request, RequestStatus
 from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder
@@ -155,6 +156,12 @@ class EngineCore:
             logger.info("Batch queue is enabled with size %d",
                         self.batch_queue_size)
             self.batch_queue = deque(maxlen=self.batch_queue_size)
+
+        # Classification of the most recent iteration, written by the step
+        # methods and consumed by the data-parallel busy loop, which is where
+        # the wave, step counter and published counts are known. Stays None
+        # while Frontier placement logging is off.
+        self.frontier_iteration: Optional[dict[str, Any]] = None
 
         self.request_block_hasher: Optional[Callable[[Request],
                                                      list[BlockHash]]] = None
@@ -305,8 +312,47 @@ class EngineCore:
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output)  # type: ignore
 
+        self._record_frontier_iteration(scheduler_output,
+                                        applied_output=True,
+                                        queue_occupancy=0)
+
         return (engine_core_outputs,
                 scheduler_output.total_num_scheduled_tokens > 0)
+
+    def _record_frontier_iteration(self,
+                                   scheduled_output: Optional[SchedulerOutput],
+                                   *, applied_output: bool,
+                                   queue_occupancy: int) -> None:
+        """Classify one engine iteration for Frontier placement analysis.
+
+        Which branch an iteration takes is what decides whether it publishes
+        request counts on its own, so the branch is recorded rather than
+        inferred later from the counts.
+        """
+        if not frontier_trace.is_dp_placement_logging_enabled():
+            return
+
+        if scheduled_output is None:
+            branch = "applied_without_scheduling"
+        elif applied_output:
+            branch = "applied_after_scheduling"
+        else:
+            branch = "scheduled_without_applying"
+
+        self.frontier_iteration = {
+            "branch":
+            branch,
+            "applied_output":
+            applied_output,
+            "queue_occupancy":
+            queue_occupancy,
+            "scheduled_new_req_ids":
+            [data.req_id for data in scheduled_output.scheduled_new_reqs]
+            if scheduled_output is not None else [],
+            "num_scheduled_tokens":
+            scheduled_output.total_num_scheduled_tokens
+            if scheduled_output is not None else 0,
+        }
 
     def post_step(self, model_executed: bool) -> None:
         if self.use_spec_decode and model_executed:
@@ -339,17 +385,22 @@ class EngineCore:
         assert len(batch_queue) < self.batch_queue_size
 
         model_executed = False
+        scheduled_output: Optional[SchedulerOutput] = None
         if self.scheduler.has_requests():
-            scheduler_output = self.scheduler.schedule()
-            future = self.model_executor.execute_model(scheduler_output)
+            scheduled_output = self.scheduler.schedule()
+            future = self.model_executor.execute_model(scheduled_output)
             batch_queue.appendleft(
-                (future, scheduler_output))  # type: ignore[arg-type]
+                (future, scheduled_output))  # type: ignore[arg-type]
 
-            model_executed = scheduler_output.total_num_scheduled_tokens > 0
+            model_executed = scheduled_output.total_num_scheduled_tokens > 0
             if model_executed and len(batch_queue) < self.batch_queue_size \
                 and not batch_queue[-1][0].done():
                 # Don't block on next worker response unless the queue is full
                 # or there are no more requests to schedule.
+                self._record_frontier_iteration(
+                    scheduled_output,
+                    applied_output=False,
+                    queue_occupancy=len(batch_queue))
                 return None, True
 
         elif not batch_queue:
@@ -365,6 +416,10 @@ class EngineCore:
 
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output)
+
+        self._record_frontier_iteration(scheduled_output,
+                                        applied_output=True,
+                                        queue_occupancy=len(batch_queue))
 
         return engine_core_outputs, model_executed
 
@@ -1072,9 +1127,10 @@ class DPEngineCoreProc(EngineCoreProc):
         else:
             super()._handle_client_request(request_type, request)
 
-    def _maybe_publish_request_counts(self):
+    def _maybe_publish_request_counts(self) -> bool:
+        """Returns whether this iteration published its request counts."""
         if not self.publish_dp_lb_stats:
-            return
+            return False
 
         # Publish our request counts (if they've changed).
         counts = self.scheduler.get_request_counts()
@@ -1085,6 +1141,31 @@ class DPEngineCoreProc(EngineCoreProc):
                                    current_wave=self.current_wave)
             self.output_queue.put_nowait(
                 (-1, EngineCoreOutputs(scheduler_stats=stats)))
+            return True
+        return False
+
+    def _log_frontier_iteration(self, published: bool) -> None:
+        """Emit the iteration the step methods classified.
+
+        `step_counter` is read before `_has_global_unfinished_reqs` advances
+        it, so it is the same value a published report carried, which makes
+        `(engine, wave, step)` the join for the whole placement chain.
+        """
+        iteration = self.frontier_iteration
+        if iteration is None:
+            return
+        self.frontier_iteration = None
+
+        num_running_reqs, num_waiting_reqs = self.scheduler.get_request_counts()
+        frontier_trace.log_dp_placement_record(
+            "engine_iteration",
+            engine=self.dp_rank,
+            wave=self.current_wave,
+            step=self.step_counter,
+            waiting=num_waiting_reqs,
+            running=num_running_reqs,
+            published=published,
+            **iteration)
 
     def run_busy_loop(self):
         """Core busy loop of the EngineCore for data parallel case."""
@@ -1096,7 +1177,7 @@ class DPEngineCoreProc(EngineCoreProc):
 
             # 2) Step the engine core.
             executed = self._process_engine_step()
-            self._maybe_publish_request_counts()
+            self._log_frontier_iteration(self._maybe_publish_request_counts())
 
             local_unfinished_reqs = self.scheduler.has_unfinished_requests()
             if not executed:

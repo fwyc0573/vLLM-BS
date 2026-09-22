@@ -12,6 +12,7 @@ import zmq
 from vllm.config import ParallelConfig
 from vllm.logger import init_logger
 from vllm.utils import get_mp_context, make_zmq_socket, set_process_title
+from vllm.v1 import frontier_trace
 from vllm.v1.engine import EngineCoreOutputs, EngineCoreRequestType
 from vllm.v1.serial_utils import MsgpackDecoder
 from vllm.v1.utils import get_engine_client_zmq_addr, shutdown
@@ -157,6 +158,10 @@ class DPCoordinatorProc:
         last_stats_wave = -1
         last_step_counts: Optional[list[list[int]]] = None
 
+        # Identifies each set of counts sent to the front ends, so a placement
+        # can be traced back to the engine reports it was computed from.
+        snapshot_id = 0
+
         with make_zmq_socket(
                 path=front_publish_address,  # IPC
                 ctx=self.ctx,
@@ -208,12 +213,23 @@ class DPCoordinatorProc:
                     if last_step_counts is not None:
                         engine_req_counts_list = last_step_counts
                         last_step_counts = None
+                        counts_source = "latched_previous_step"
                     else:
                         engine_req_counts_list = self._get_engine_counts()
                         stats_changed = False
+                        counts_source = "current"
+
+                    snapshot_id += 1
+                    frontier_trace.log_dp_placement_record(
+                        "coordinator_publish",
+                        snapshot=snapshot_id,
+                        counts=engine_req_counts_list,
+                        counts_source=counts_source,
+                        wave=current_wave,
+                        engines_running=engines_running)
 
                     to_publish = (engine_req_counts_list, current_wave,
-                                  engines_running)
+                                  engines_running, snapshot_id)
                     publish_front.send(msgspec.msgpack.encode(to_publish))
                     last_publish_time = int(time.time() * 1000)
                     continue
@@ -290,21 +306,35 @@ class DPCoordinatorProc:
                         stats = self.engines[eng_index].request_counts
                         stats_step = scheduler_stats.step_counter
                         stats_wave = scheduler_stats.current_wave
+                        disposition = "applied_without_latch"
                         if (stats_wave > last_stats_wave
                                 or stats_wave == last_stats_wave
                                 and stats_step > last_stats_step):
                             if stats_changed:
                                 last_step_counts = self._get_engine_counts(
                                     do_copy=True)
+                                disposition = "latched_previous_step"
+                            else:
+                                disposition = "advanced_without_latch"
                             last_stats_step = stats_step
                             last_stats_wave = stats_wave
                         elif stats_wave != last_stats_wave or (
                                 stats_step != last_stats_step):
+                            disposition = "out_of_order"
                             logger.warning(
                                 "Received stats for out-of-order "
                                 "step (%d, %d) from engine %d (expected "
                                 "> (%d, %d))", stats_wave, stats_step,
                                 eng_index, last_stats_wave, last_stats_step)
+                        frontier_trace.log_dp_placement_record(
+                            "coordinator_receive",
+                            engine=eng_index,
+                            wave=stats_wave,
+                            step=stats_step,
+                            waiting=scheduler_stats.num_waiting_reqs,
+                            running=scheduler_stats.num_running_reqs,
+                            disposition=disposition,
+                            latched_counts=last_step_counts)
                         stats[0] = scheduler_stats.num_waiting_reqs
                         stats[1] = scheduler_stats.num_running_reqs
                         stats_changed = True
@@ -335,7 +365,8 @@ class DPCoordinatorProc:
                         self._send_start_wave(publish_back, wave, eng_index)
 
                 if wave_state_changed:
-                    message = (None, current_wave, engines_running)
+                    message = (None, current_wave, engines_running,
+                               snapshot_id)
                     publish_front.send(msgspec.msgpack.encode(message))
 
     @staticmethod

@@ -29,6 +29,7 @@ from vllm.v1.engine import (EngineCoreOutputs, EngineCoreRequest,
                             EngineCoreRequestType,
                             ReconfigureDistributedRequest, ReconfigureRankType,
                             UtilityOutput)
+from vllm.v1 import frontier_trace
 from vllm.v1.engine.coordinator import DPCoordinator
 from vllm.v1.engine.core import EngineCore, EngineCoreProc
 from vllm.v1.engine.exceptions import EngineDeadError
@@ -977,6 +978,10 @@ class DPAsyncMPClient(AsyncMPClient):
         # List of [waiting, running] pair per engine.
         # Used only by DPLBAsyncMPClient subclass.
         self.lb_engines: list[list[int]] = [[0, 0] for _ in self.core_engines]
+        # Coordinator snapshot the counts above came from; 0 until the first
+        # one arrives, so a placement made from the initial zeros is visible
+        # as such.
+        self.lb_snapshot: int = 0
 
         self.first_req_sock_addr = get_open_zmq_inproc_path()
         self.first_req_send_socket = self.resources.first_req_send_socket = (
@@ -1070,12 +1075,20 @@ class DPAsyncMPClient(AsyncMPClient):
                         continue
 
                     # Update local load-balancing state.
-                    counts, wave, running = msgspec.msgpack.decode(buf)
+                    counts, wave, running, snapshot = msgspec.msgpack.decode(
+                        buf)
                     self.current_wave = wave
                     self.engines_running = running
                     if counts is not None:
                         sliced_counts = counts[count_slice]
                         self.lb_engines = sliced_counts
+                        self.lb_snapshot = snapshot
+                        frontier_trace.log_dp_placement_record(
+                            "frontend_snapshot",
+                            snapshot=snapshot,
+                            counts=sliced_counts,
+                            wave=wave,
+                            engines_running=running)
                         logger.debug("Received counts: %s (%s)", sliced_counts,
                                      count_slice)
 
@@ -1147,6 +1160,15 @@ class DPLBAsyncMPClient(DPAsyncMPClient):
                 if score < min_score:
                     min_score = score
                     eng_index = idx
+            frontier_trace.log_dp_placement_record(
+                "frontend_route",
+                request_id=request.request_id,
+                engine=eng_index,
+                snapshot=self.lb_snapshot,
+                counts=[list(counts) for counts in current_counts],
+                score=min_score,
+                start_index=self.eng_start_index,
+                reservation=self.client_count)
             # Increment local waiting count for better balancing between stats
             # updates from the coordinator (which happen every 100ms).
             current_counts[eng_index][0] += self.client_count
