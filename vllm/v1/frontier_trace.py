@@ -2,18 +2,16 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Runtime gate for Frontier trace logging."""
 
-import atexit
 from contextlib import contextmanager
 import json
 import os
 import time
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional, TextIO
 
 _SKIP_WARMUP = os.environ.get("VLLM_FRONTIER_TRACE_SKIP_WARMUP", "0") == "1"
 _TRACE_ACTIVE = not _SKIP_WARMUP
 _PP_BOUNDARY_LOG_ENV_VAR = "VLLM_FRONTIER_PP_BOUNDARY_LOG_PATH"
 _DP_PLACEMENT_LOG_DIR_ENV_VAR = "VLLM_FRONTIER_DP_PLACEMENT_LOG_DIR"
-_DP_PLACEMENT_FLUSH_EVERY = 1024
 _PP_BOUNDARY_REQUIRED_FIELDS = (
     "model_name",
     "timestamp",
@@ -108,10 +106,11 @@ def disable_for_warmup():
 # Data-parallel placement records. Every process that takes part in a placement
 # decision -- each engine core, the coordinator, each API server -- writes its
 # own file, so records never interleave and the reader can tell the roles
-# apart. They are buffered because an engine core writes one per iteration of
-# its busy loop; they reach disk every _DP_PLACEMENT_FLUSH_EVERY records and at
-# normal process exit.
-_dp_placement_records: list[dict[str, Any]] = []
+# apart. Each record reaches the file as it is written: engine cores and the
+# coordinator are forked and stopped by a signal, so a forked process never
+# runs exit hooks and a buffer held in memory would be lost with it.
+_dp_placement_file: Optional[TextIO] = None
+_dp_placement_file_pid: Optional[int] = None
 _dp_placement_seq = 0
 
 
@@ -124,7 +123,7 @@ def is_dp_placement_logging_enabled() -> bool:
 
 
 def log_dp_placement_record(kind: str, **fields: Any) -> None:
-    """Buffer one placement record of the given kind.
+    """Write one placement record of the given kind.
 
     `seq` orders the records one process wrote and is the tie-break when two
     of them carry the same correlation id. Timestamps are for reading; the
@@ -133,37 +132,31 @@ def log_dp_placement_record(kind: str, **fields: Any) -> None:
     if not is_dp_placement_logging_enabled():
         return
 
-    global _dp_placement_seq
+    global _dp_placement_file, _dp_placement_file_pid, _dp_placement_seq
+    pid = os.getpid()
+    if _dp_placement_file_pid != pid:
+        # A forked process inherits the parent's handle; it opens its own.
+        log_dir = get_dp_placement_log_dir()
+        os.makedirs(log_dir, exist_ok=True)
+        log_path = os.path.join(log_dir, f"dp_placement_{pid}.jsonl")
+        try:
+            _dp_placement_file = open(log_path,
+                                      "a",
+                                      encoding="utf-8",
+                                      buffering=1)
+        except OSError as exc:
+            raise RuntimeError(
+                f"Failed to open Frontier DP placement log file: {log_path}"
+            ) from exc
+        _dp_placement_file_pid = pid
+        _dp_placement_seq = 0
+
     record: dict[str, Any] = {
         "kind": kind,
-        "pid": os.getpid(),
+        "pid": pid,
         "seq": _dp_placement_seq,
         "monotonic": time.monotonic(),
     }
     record.update(fields)
-    _dp_placement_records.append(record)
+    _dp_placement_file.write(json.dumps(record) + "\n")
     _dp_placement_seq += 1
-
-    if len(_dp_placement_records) >= _DP_PLACEMENT_FLUSH_EVERY:
-        flush_dp_placement_records()
-
-
-def flush_dp_placement_records() -> None:
-    if not _dp_placement_records:
-        return
-
-    log_dir = get_dp_placement_log_dir()
-    os.makedirs(log_dir, exist_ok=True)
-    log_path = os.path.join(log_dir, f"dp_placement_{os.getpid()}.jsonl")
-    try:
-        with open(log_path, "a", encoding="utf-8") as file:
-            for record in _dp_placement_records:
-                file.write(json.dumps(record) + "\n")
-    except OSError as exc:
-        raise RuntimeError(
-            f"Failed to write Frontier DP placement log file: {log_path}"
-        ) from exc
-    _dp_placement_records.clear()
-
-
-atexit.register(flush_dp_placement_records)
