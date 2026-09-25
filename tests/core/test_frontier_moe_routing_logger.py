@@ -129,8 +129,6 @@ class _DummyMoEMethod:
             apply_router_weight_on_input=apply_router_weight_on_input,
             global_num_experts=global_num_experts,
             expert_map=expert_map,
-            dp_rank=0,
-            dispatched_across_dp=False,
         )
 
 
@@ -229,8 +227,8 @@ def test_fused_moe_forward_cuda_logs_routing(tmp_path):
                 ep_rank=layer.ep_rank,
                 ep_size=layer.ep_size,
                 expert_map=None,
-            dp_rank=0,
-            dispatched_across_dp=False,
+                dp_rank=0,
+                dispatched_across_dp=False,
         ):
             method.forward_cuda(
                 layer=layer,
