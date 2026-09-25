@@ -21,6 +21,10 @@ def test_frontier_moe_routing_logger_writes_expected_fields(tmp_path):
         batch_num_tokens=4,
         batch_num_prefill_tokens=4,
         batch_num_decode_tokens=0,
+        request_ids=["req-0", "req-1"],
+        request_num_computed_tokens=[0, 5],
+        request_num_scheduled_tokens=[1, 1],
+        pp_rank=0,
     )
 
     topk_ids = torch.tensor([[0, 1], [1, 1]], dtype=torch.int64)
@@ -35,6 +39,8 @@ def test_frontier_moe_routing_logger_writes_expected_fields(tmp_path):
             ep_rank=0,
             ep_size=1,
             expert_map=None,
+            dp_rank=0,
+            dispatched_across_dp=False,
         )
 
     logger.finish_batch()
@@ -49,6 +55,13 @@ def test_frontier_moe_routing_logger_writes_expected_fields(tmp_path):
     assert record["layer_name"] == "layers.0.block_sparse_moe"
     assert record["total_routed_tokens"] == 4
     assert record["per_expert_tokens"] == {"0": 1, "1": 3}
+    assert record["pp_rank"] == 0 and record["dp_rank"] == 0
+    assert record["requests"] == [
+        {"request_id": "req-0", "num_computed_tokens": 0,
+         "num_scheduled_tokens": 1, "expert_tokens": {"0": 1, "1": 1}},
+        {"request_id": "req-1", "num_computed_tokens": 5,
+         "num_scheduled_tokens": 1, "expert_tokens": {"1": 2}},
+    ]
 
 
 class _DummyMoEMethod:
@@ -116,6 +129,8 @@ class _DummyMoEMethod:
             apply_router_weight_on_input=apply_router_weight_on_input,
             global_num_experts=global_num_experts,
             expert_map=expert_map,
+            dp_rank=0,
+            dispatched_across_dp=False,
         )
 
 
@@ -142,6 +157,10 @@ def test_frontier_moe_routing_logger_uses_local_expected_total_when_expert_map_p
         batch_num_tokens=4,
         batch_num_prefill_tokens=4,
         batch_num_decode_tokens=0,
+        request_ids=["req-0", "req-1"],
+        request_num_computed_tokens=[0, 5],
+        request_num_scheduled_tokens=[1, 1],
+        pp_rank=0,
     )
 
     topk_ids = torch.tensor([[0, 1], [2, 3]], dtype=torch.int64)
@@ -158,6 +177,8 @@ def test_frontier_moe_routing_logger_uses_local_expected_total_when_expert_map_p
             ep_rank=0,
             ep_size=2,
             expert_map=expert_map,
+            dp_rank=0,
+            dispatched_across_dp=False,
         )
 
     logger.finish_batch()
@@ -181,6 +202,10 @@ def test_fused_moe_forward_cuda_logs_routing(tmp_path):
         batch_num_tokens=4,
         batch_num_prefill_tokens=4,
         batch_num_decode_tokens=0,
+        request_ids=["req-0", "req-1"],
+        request_num_computed_tokens=[0, 5],
+        request_num_scheduled_tokens=[1, 1],
+        pp_rank=0,
     )
 
     hidden_states = torch.randn(2, 4)
@@ -204,6 +229,8 @@ def test_fused_moe_forward_cuda_logs_routing(tmp_path):
                 ep_rank=layer.ep_rank,
                 ep_size=layer.ep_size,
                 expert_map=None,
+            dp_rank=0,
+            dispatched_across_dp=False,
         ):
             method.forward_cuda(
                 layer=layer,
@@ -245,6 +272,10 @@ def test_moe_routing_context_required_for_logging(tmp_path):
         batch_num_tokens=2,
         batch_num_prefill_tokens=2,
         batch_num_decode_tokens=0,
+        request_ids=["req-0"],
+        request_num_computed_tokens=[0],
+        request_num_scheduled_tokens=[1],
+        pp_rank=0,
     )
 
     topk_ids = torch.tensor([[0, 1]], dtype=torch.int64)
@@ -253,3 +284,90 @@ def test_moe_routing_context_required_for_logging(tmp_path):
             log_frontier_moe_routing_from_context(topk_ids)
 
     logger.finish_batch()
+
+
+class _DispatchedForwardContext:
+
+    class dp_metadata:
+        # DP rank 0 scheduled 3 tokens and DP rank 1 scheduled 2.
+        cu_tokens_across_dp_cpu = torch.tensor([3, 5])
+
+
+def test_frontier_moe_routing_logger_splits_its_dp_slice_by_request(
+        tmp_path, monkeypatch):
+    import vllm.forward_context
+    monkeypatch.setattr(vllm.forward_context, "get_forward_context",
+                        lambda: _DispatchedForwardContext)
+    log_path = tmp_path / "frontier_moe_routing_dp_slice.jsonl"
+    logger = FrontierMoeRoutingLogger(str(log_path))
+    logger.start_batch(
+        batch_id=3,
+        batch_size=2,
+        batch_num_tokens=2,
+        batch_num_prefill_tokens=0,
+        batch_num_decode_tokens=2,
+        request_ids=["req-a", "req-b"],
+        request_num_computed_tokens=[16, 40],
+        request_num_scheduled_tokens=[1, 1],
+        pp_rank=1,
+    )
+    # Rows 0-2 are DP rank 0's tokens; rows 3 and 4 are this rank's requests.
+    topk_ids = torch.tensor([[0, 1], [0, 1], [0, 1], [2, 3], [1, 3]])
+    expert_map = torch.tensor([-1, -1, 0, 1])
+    with logger.activate():
+        log_frontier_moe_routing(
+            layer_name="layers.0.mlp.experts",
+            topk_ids=topk_ids,
+            num_tokens=5,
+            router_topk=2,
+            global_num_experts=4,
+            local_num_experts=2,
+            ep_rank=1,
+            ep_size=2,
+            expert_map=expert_map,
+            dp_rank=1,
+            dispatched_across_dp=True,
+        )
+    logger.finish_batch()
+
+    record = json.loads(log_path.read_text())
+    # The local load still covers every routed token of both DP ranks.
+    assert record["per_expert_tokens"] == {"0": 1, "1": 2}
+    assert (record["pp_rank"], record["dp_rank"], record["ep_rank"]) == (1, 1, 1)
+    assert record["requests"] == [
+        {"request_id": "req-a", "num_computed_tokens": 16,
+         "num_scheduled_tokens": 1, "expert_tokens": {"2": 1, "3": 1}},
+        {"request_id": "req-b", "num_computed_tokens": 40,
+         "num_scheduled_tokens": 1, "expert_tokens": {"1": 1, "3": 1}},
+    ]
+
+
+def test_frontier_moe_routing_logger_rejects_rows_that_are_not_the_batch(
+        tmp_path):
+    logger = FrontierMoeRoutingLogger(str(tmp_path / "rows.jsonl"))
+    logger.start_batch(
+        batch_id=0,
+        batch_size=1,
+        batch_num_tokens=3,
+        batch_num_prefill_tokens=3,
+        batch_num_decode_tokens=0,
+        request_ids=["req-0"],
+        request_num_computed_tokens=[0],
+        request_num_scheduled_tokens=[3],
+        pp_rank=0,
+    )
+    # A chunk of the batch, as the chunked forward path routes it.
+    with logger.activate(), pytest.raises(RuntimeError, match="scheduled tokens"):
+        log_frontier_moe_routing(
+            layer_name="layers.0.mlp.experts",
+            topk_ids=torch.tensor([[0, 1], [1, 2]]),
+            num_tokens=2,
+            router_topk=2,
+            global_num_experts=4,
+            local_num_experts=4,
+            ep_rank=0,
+            ep_size=1,
+            expert_map=None,
+            dp_rank=0,
+            dispatched_across_dp=False,
+        )

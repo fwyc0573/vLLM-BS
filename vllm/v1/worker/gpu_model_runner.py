@@ -2305,12 +2305,14 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         frontier_moe_logger = None
         frontier_batch_req_ids = None
         frontier_req_tokens = None
+        frontier_req_computed_tokens = None
         frontier_num_prefill_tokens = 0
         frontier_num_decode_tokens = 0
         if trace_active:
             frontier_op_logger = self._frontier_cuda_event_op_logger
             frontier_moe_logger = self._frontier_moe_routing_logger
             if (FRONTIER_BATCH_LOG_ENABLED or frontier_op_logger is not None
+                    or frontier_moe_logger is not None
                     or frontier_pp_boundary_trace_enabled):
                 batch_req_ids = list(self.input_batch.req_ids)
                 req_tokens = []
@@ -2326,6 +2328,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         num_prefill_tokens += scheduled_tokens
                 frontier_batch_req_ids = batch_req_ids
                 frontier_req_tokens = req_tokens
+                frontier_req_computed_tokens = [
+                    int(self.input_batch.num_computed_tokens_cpu[i])
+                    for i in range(len(batch_req_ids))
+                ]
                 frontier_num_prefill_tokens = num_prefill_tokens
                 frontier_num_decode_tokens = num_decode_tokens
             frontier_forward_start_ts = None
@@ -2373,6 +2379,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     batch_num_tokens=int(num_input_tokens),
                     batch_num_prefill_tokens=frontier_num_prefill_tokens,
                     batch_num_decode_tokens=frontier_num_decode_tokens,
+                    request_ids=frontier_batch_req_ids,
+                    request_num_computed_tokens=frontier_req_computed_tokens,
+                    request_num_scheduled_tokens=frontier_req_tokens,
+                    pp_rank=get_pp_group().rank_in_group,
                 )
             self._frontier_forward_start_event.record()
 

@@ -225,7 +225,9 @@ def test_frontier_compile_safe_helpers_skip_contextvars(monkeypatch):
             local_num_experts=8,
             ep_rank=0,
             ep_size=1,
-            expert_map=None):
+            expert_map=None,
+            dp_rank=0,
+            dispatched_across_dp=False):
         pass
 
     assert not v1_utils.should_record_frontier_op_meta("attn_pre_proj")
@@ -243,4 +245,6 @@ def test_frontier_compile_safe_helpers_skip_contextvars(monkeypatch):
         ep_rank=0,
         ep_size=1,
         expert_map=None,
+        dp_rank=0,
+        dispatched_across_dp=False,
     )

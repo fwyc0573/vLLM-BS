@@ -1699,6 +1699,8 @@ class FusedMoE(CustomOp):
                     ep_rank=self.ep_rank,
                     ep_size=self.ep_size,
                     expert_map=self.expert_map,
+                    dp_rank=self.dp_rank,
+                    dispatched_across_dp=False,
             ):
                 final_hidden_states = self.quant_method.apply(
                     layer=self,
@@ -1817,6 +1819,8 @@ class FusedMoE(CustomOp):
                 ep_rank=self.ep_rank,
                 ep_size=self.ep_size,
                 expert_map=self.expert_map,
+                dp_rank=self.dp_rank,
+                dispatched_across_dp=do_naive_dispatch_combine,
         ):
             final_hidden_states = self.quant_method.apply(
                 layer=self,

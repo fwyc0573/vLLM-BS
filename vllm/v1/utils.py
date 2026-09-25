@@ -534,7 +534,14 @@ class FrontierCudaEventOpLogger:
 
 
 class FrontierMoeRoutingLogger:
-    """Collect per-expert token distribution for Frontier MoE routing analysis."""
+    """Collect per-expert token distribution for Frontier MoE routing analysis.
+
+    Each record holds one layer's routing on one worker: the local experts'
+    loads over every token the layer routed, and, per request of the worker's
+    own batch, the tokens sent to each global expert. With naive DP dispatch the
+    layer routes the tokens of every DP rank, concatenated in DP-rank order; the
+    worker's own rows are its slice of that concatenation.
+    """
 
     def __init__(self, log_path: str) -> None:
         if not log_path:
@@ -550,6 +557,7 @@ class FrontierMoeRoutingLogger:
             ) from exc
         self._batch_active = False
         self._batch_meta: dict[str, int] = {}
+        self._batch_requests: list[tuple[str, int, int]] = []
 
     @contextlib.contextmanager
     def activate(self) -> Iterator[None]:
@@ -566,9 +574,17 @@ class FrontierMoeRoutingLogger:
         batch_num_tokens: int,
         batch_num_prefill_tokens: int,
         batch_num_decode_tokens: int,
+        request_ids: list[str],
+        request_num_computed_tokens: list[int],
+        request_num_scheduled_tokens: list[int],
+        pp_rank: int,
     ) -> None:
         if self._batch_active:
             raise RuntimeError("Frontier MoE routing batch already active.")
+        if not (len(request_ids) == len(request_num_computed_tokens) ==
+                len(request_num_scheduled_tokens)):
+            raise RuntimeError(
+                "Frontier MoE routing request metadata lengths differ.")
         self._batch_active = True
         self._batch_meta = {
             "batch_id": batch_id,
@@ -576,7 +592,11 @@ class FrontierMoeRoutingLogger:
             "batch_num_tokens": batch_num_tokens,
             "batch_num_prefill_tokens": batch_num_prefill_tokens,
             "batch_num_decode_tokens": batch_num_decode_tokens,
+            "pp_rank": pp_rank,
         }
+        self._batch_requests = list(
+            zip(request_ids, request_num_computed_tokens,
+                request_num_scheduled_tokens))
 
     def finish_batch(self) -> None:
         if not self._batch_active:
@@ -585,6 +605,7 @@ class FrontierMoeRoutingLogger:
             )
         self._batch_active = False
         self._batch_meta = {}
+        self._batch_requests = []
         self._log_file.flush()
 
     def log_routing(
@@ -598,6 +619,8 @@ class FrontierMoeRoutingLogger:
         ep_rank: int,
         ep_size: int,
         expert_map: Optional[torch.Tensor],
+        dp_rank: int,
+        dispatched_across_dp: bool,
     ) -> None:
         if not self._batch_active:
             raise RuntimeError(
@@ -703,6 +726,36 @@ class FrontierMoeRoutingLogger:
                 - (num_experts_per_device + 1) / num_experts_per_device
             )
 
+        own_ids = flat_ids.view(-1, router_topk)
+        if dispatched_across_dp:
+            from vllm.forward_context import get_forward_context
+            cu_tokens = get_forward_context(
+            ).dp_metadata.cu_tokens_across_dp_cpu
+            own_start = 0 if dp_rank == 0 else int(cu_tokens[dp_rank - 1])
+            own_ids = own_ids[own_start:int(cu_tokens[dp_rank])]
+        scheduled = [
+            num_scheduled for _, _, num_scheduled in self._batch_requests
+        ]
+        if own_ids.shape[0] != sum(scheduled):
+            raise RuntimeError(
+                f"MoE routing rows of this rank ({own_ids.shape[0]}) do not "
+                f"match its scheduled tokens ({sum(scheduled)}); per-request "
+                "routing records need unpadded rows in scheduling order.")
+        requests = []
+        for (request_id, num_computed, num_scheduled), request_rows in zip(
+                self._batch_requests, torch.split(own_ids, scheduled)):
+            expert_tokens = torch.bincount(request_rows.reshape(-1),
+                                           minlength=global_num_experts)
+            requests.append({
+                "request_id": request_id,
+                "num_computed_tokens": int(num_computed),
+                "num_scheduled_tokens": int(num_scheduled),
+                "expert_tokens": {
+                    str(i): int(c)
+                    for i, c in enumerate(expert_tokens.tolist()) if c > 0
+                },
+            })
+
         record = {
             **self._batch_meta,
             "layer_name": layer_name,
@@ -712,6 +765,7 @@ class FrontierMoeRoutingLogger:
             "num_experts_per_device": num_experts_per_device,
             "ep_rank": ep_rank,
             "ep_size": ep_size,
+            "dp_rank": dp_rank,
             "total_routed_tokens": total_routed_tokens,
             "expected_total_routed_tokens": expected_total_routed,
             "tokens_per_expert_avg": mean,
@@ -726,6 +780,7 @@ class FrontierMoeRoutingLogger:
             "per_expert_tokens": {
                 str(i): int(c) for i, c in enumerate(counts) if c > 0
             },
+            "requests": requests,
             "timestamp": time.time(),
         }
         self._log_file.write(json.dumps(record) + "\n")
@@ -742,6 +797,8 @@ class FrontierMoeRoutingContext:
     ep_rank: int
     ep_size: int
     expert_map: Optional[torch.Tensor]
+    dp_rank: int
+    dispatched_across_dp: bool
 
 
 @contextlib.contextmanager
@@ -755,6 +812,8 @@ def frontier_moe_routing_context(
     ep_rank: int,
     ep_size: int,
     expert_map: Optional[torch.Tensor],
+    dp_rank: int,
+    dispatched_across_dp: bool,
 ) -> Iterator[None]:
     if not _frontier_contextvars_enabled():
         yield
@@ -801,6 +860,8 @@ def frontier_moe_routing_context(
         ep_rank=ep_rank,
         ep_size=ep_size,
         expert_map=expert_map,
+        dp_rank=dp_rank,
+        dispatched_across_dp=dispatched_across_dp,
     )
     token = _FRONTIER_MOE_ROUTING_CONTEXT.set(context)
     try:
@@ -833,6 +894,8 @@ def log_frontier_moe_routing_from_context(
         ep_rank=context.ep_rank,
         ep_size=context.ep_size,
         expert_map=context.expert_map,
+        dp_rank=context.dp_rank,
+        dispatched_across_dp=context.dispatched_across_dp,
     )
 
 class ConstantList(Generic[T], Sequence):
@@ -1239,6 +1302,8 @@ def log_frontier_moe_routing(
     ep_rank: int,
     ep_size: int,
     expert_map: Optional[torch.Tensor],
+    dp_rank: int,
+    dispatched_across_dp: bool,
 ) -> None:
     if not _frontier_contextvars_enabled() or not frontier_trace.is_active():
         return
@@ -1255,4 +1320,6 @@ def log_frontier_moe_routing(
         ep_rank=ep_rank,
         ep_size=ep_size,
         expert_map=expert_map,
+        dp_rank=dp_rank,
+        dispatched_across_dp=dispatched_across_dp,
     )
