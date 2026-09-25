@@ -270,6 +270,9 @@ class FrontierCudaEventOpLogger:
     def should_record(self, op_name: str) -> bool:
         return op_name in self._scopes
 
+    def should_record_meta(self, op_name: str) -> bool:
+        return self._meta_enabled and op_name in self._scopes
+
     def _requires_kernel_only_post_sync(self, op_name: str) -> bool:
         return (
             op_name.endswith("allreduce")
@@ -1276,10 +1279,12 @@ def record_frontier_op_meta(op_name: str, meta: dict[str, Any]) -> None:
 
 
 def should_record_frontier_op_meta(op_name: str) -> bool:
+    # Callers build the meta only when this holds, so timing-only runs skip
+    # that host work and the inputs it reads.
     if not _frontier_contextvars_enabled() or not frontier_trace.is_active():
         return False
     op_logger = _FRONTIER_CUDA_EVENT_OP_LOGGER.get()
-    return op_logger is not None and op_logger.should_record(op_name)
+    return op_logger is not None and op_logger.should_record_meta(op_name)
 
 
 def set_frontier_positions_meta(meta: dict[str, Any]) -> None:

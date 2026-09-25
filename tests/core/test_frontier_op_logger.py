@@ -364,6 +364,28 @@ def test_tensor_model_parallel_all_reduce_records_meta_inside_active_scope(
 
 
 
+@pytest.mark.parametrize("meta_enabled", [False, True])
+def test_op_meta_is_built_only_when_meta_is_enabled(tmp_path, meta_enabled):
+    from vllm.v1 import frontier_trace
+    from vllm.v1.utils import should_record_frontier_op_meta
+
+    logger = FrontierCudaEventOpLogger(
+        str(tmp_path / "frontier_ops.jsonl"),
+        scopes=["attn_rope"],
+        meta_enabled=meta_enabled,
+        timing_mode="cuda_event",
+    )
+    trace_was_active = frontier_trace.is_active()
+    frontier_trace.activate()
+    try:
+        with logger.activate():
+            assert should_record_frontier_op_meta("attn_rope") is meta_enabled
+            assert should_record_frontier_op_meta("attn_decode") is False
+    finally:
+        if not trace_was_active:
+            frontier_trace.deactivate()
+
+
 def test_cuda_event_mode_allows_empty_pure_decode_batch(tmp_path, monkeypatch):
     log_path = tmp_path / "frontier_cuda_event_empty_decode.jsonl"
     sync_calls = []
