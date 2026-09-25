@@ -486,6 +486,9 @@ class Worker(WorkerBase):
                     "recv_end_ts": pp_recv_end_ts,
                     "send_start_ts": pp_send_start_ts,
                     "send_end_ts": pp_send_end_ts,
+                    # The last rank's forward is followed by logits and
+                    # sampling before the output returns to the engine.
+                    "execute_end_ts": time.monotonic(),
                 })
             return output
 
