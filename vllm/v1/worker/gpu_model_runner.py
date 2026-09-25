@@ -2355,6 +2355,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     "num_decode_tokens": frontier_num_decode_tokens,
                     "request_ids": list(frontier_batch_req_ids),
                     "pp_rank": frontier_pp_group.rank_in_group,
+                    "dp_rank": self.parallel_config.data_parallel_rank,
                     "pp_world_size": frontier_pp_group.world_size,
                     "is_first_rank": frontier_pp_group.is_first_rank,
                     "is_last_rank": frontier_pp_group.is_last_rank,
@@ -2371,6 +2372,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     batch_num_decode_tokens=frontier_num_decode_tokens,
                     batch_request_num_tokens=frontier_req_tokens,
                     pp_rank=get_pp_group().rank_in_group,
+                    dp_rank=self.parallel_config.data_parallel_rank,
                 )
             if frontier_moe_logger is not None:
                 frontier_moe_logger.start_batch(
@@ -2460,6 +2462,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     "batch_num_decode_tokens": frontier_num_decode_tokens,
                     "batch_execution_time_ms": forward_time_ms,
                     "timestamp": time.time(),
+                    "pp_rank": get_pp_group().rank_in_group,
+                    "dp_rank": self.parallel_config.data_parallel_rank,
                     "request_ids": frontier_batch_req_ids,
                     "request_num_tokens": frontier_req_tokens,
                 }

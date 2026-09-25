@@ -1187,7 +1187,14 @@ class DPEngineCoreProc(EngineCoreProc):
 
                 # We are in a running state and so must execute a dummy pass
                 # if the model didn't execute any ready requests.
+                dummy_start = time.monotonic()
                 self.execute_dummy_batch()
+                frontier_trace.log_dp_placement_record(
+                    "dummy_pass",
+                    engine=self.dp_rank,
+                    wave=self.current_wave,
+                    step=self.step_counter,
+                    start_monotonic=dummy_start)
 
             # 3) All-reduce operation to determine global unfinished reqs.
             self.engines_running = self._has_global_unfinished_reqs(

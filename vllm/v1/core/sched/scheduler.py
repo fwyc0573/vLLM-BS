@@ -985,6 +985,7 @@ class Scheduler(SchedulerInterface):
         _log_frontier_schedule({
             "event": "schedule",
             "step": self._frontier_schedule_step,
+            "dp_rank": self.parallel_config.data_parallel_rank,
             "timestamp": time.time(),
             "timestamp_monotonic": scheduled_timestamp,
             "scheduled_new_req_ids": [req.request_id for req in scheduled_new_reqs],

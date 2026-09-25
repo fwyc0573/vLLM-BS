@@ -285,6 +285,7 @@ class FrontierCudaEventOpLogger:
         batch_num_decode_tokens: int,
         batch_request_num_tokens: Optional[list[int]] = None,
         pp_rank: Optional[int] = None,
+        dp_rank: Optional[int] = None,
     ) -> None:
         if self._batch_active:
             raise RuntimeError("Frontier CUDA event batch already active.")
@@ -307,6 +308,8 @@ class FrontierCudaEventOpLogger:
             self._batch_meta["batch_request_num_tokens"] = batch_request_num_tokens
         if pp_rank is not None:
             self._batch_meta["pp_rank"] = int(pp_rank)
+        if dp_rank is not None:
+            self._batch_meta["dp_rank"] = int(dp_rank)
         self._pending_events = []
         self._pending_meta = {}
         self._scope_seq_by_op = {}
