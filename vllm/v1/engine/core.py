@@ -305,12 +305,19 @@ class EngineCore:
         # or finished and not yet removed from the batch.
         if not self.scheduler.has_requests():
             return {}, False
+        step_start = time.perf_counter()
         scheduler_output = self.scheduler.schedule()
+        schedule_end = time.perf_counter()
         model_output = self.execute_model_with_error_logging(
             self.model_executor.execute_model,  # type: ignore
             scheduler_output)
+        execute_end = time.perf_counter()
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output)  # type: ignore
+        if frontier_trace.CPU_PROBE_ENABLED:
+            frontier_trace.record_cpu_probe_step(
+                (step_start, schedule_end, execute_end, time.perf_counter()),
+                scheduler_output.num_scheduled_tokens)
 
         self._record_frontier_iteration(scheduler_output,
                                         applied_output=True,
@@ -424,6 +431,7 @@ class EngineCore:
         return engine_core_outputs, model_executed
 
     def shutdown(self):
+        frontier_trace.write_cpu_probe_log()
         self.structured_output_manager.clear_backend()
         if self.model_executor:
             self.model_executor.shutdown()

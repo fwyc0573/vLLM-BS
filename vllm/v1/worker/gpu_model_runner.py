@@ -2239,6 +2239,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         scheduler_output: "SchedulerOutput",
         intermediate_tensors: Optional[IntermediateTensors] = None,
     ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
+        execute_start = time.perf_counter()
         self._frontier_pp_boundary_trace_context = None
         frontier_pp_boundary_trace_enabled = (
             FRONTIER_INSTRUMENTATION_ENABLED
@@ -2296,6 +2297,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                                uniform_decode=uniform_decode)
             cudagraph_runtime_mode, batch_descriptor = \
                 self.cudagraph_dispatcher.dispatch(batch_descriptor)
+        preprocess_end = time.perf_counter()
 
         # Run the model.
         # Use persistent buffers for CUDA graphs.
@@ -2416,6 +2418,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
+        forward_end = time.perf_counter()
         frontier_forward_end_ts = None
         if frontier_pp_boundary_trace_enabled:
             frontier_forward_end_ts = time.monotonic()
@@ -2519,6 +2522,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         with record_function_or_nullcontext("Sample"):
             sampler_output = self._sample(logits, spec_decode_metadata)
+        sample_end = time.perf_counter()
 
         with record_function_or_nullcontext("Bookkeep"):
             (
@@ -2532,6 +2536,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             ) = self._bookkeeping_sync(scheduler_output, sampler_output,
                                        logits, hidden_states,
                                        num_scheduled_tokens)
+        bookkeep_end = time.perf_counter()
 
         if self.speculative_config:
             assert spec_decode_common_attn_metadata is not None
@@ -2560,6 +2565,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             kv_connector_output=kv_connector_output,
             num_nans_in_logits=num_nans_in_logits,
         )
+        if frontier_trace.CPU_PROBE_ENABLED:
+            frontier_trace.record_cpu_probe_runner_stamps(
+                (execute_start, preprocess_end, forward_end, sample_end,
+                 bookkeep_end, time.perf_counter()))
 
         if not self.use_async_scheduling:
             return output

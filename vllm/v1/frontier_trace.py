@@ -90,6 +90,54 @@ def log_pp_boundary_record(record: Mapping[str, Any]) -> bool:
     return True
 
 
+# Per-step host timing (CPU probe). With one worker the model runner runs in the
+# engine core process. Both keep their time.perf_counter stamps in memory, so no
+# file write lands inside a timed step, and the engine core writes every step
+# once, from EngineCore.shutdown, which the engine core's signal handler reaches.
+_CPU_PROBE_LOG_PATH = os.environ.get("VLLM_FRONTIER_CPU_PROBE_LOG_PATH", "")
+CPU_PROBE_ENABLED = bool(_CPU_PROBE_LOG_PATH)
+_CPU_PROBE_ENGINE_FIELDS = ("step_start", "schedule_end", "execute_end",
+                            "update_end")
+_CPU_PROBE_RUNNER_FIELDS = ("execute_start", "preprocess_end", "forward_end",
+                            "sample_end", "bookkeep_end", "execute_return")
+_cpu_probe_steps: list[tuple[tuple[float, ...], Optional[tuple[float, ...]],
+                             Mapping[str, int]]] = []
+_cpu_probe_runner_stamps: Optional[tuple[float, ...]] = None
+
+
+def record_cpu_probe_runner_stamps(stamps: tuple[float, ...]) -> None:
+    """Keep the runner's stamps of the current step (_CPU_PROBE_RUNNER_FIELDS)."""
+    global _cpu_probe_runner_stamps
+    _cpu_probe_runner_stamps = stamps
+
+
+def record_cpu_probe_step(engine_stamps: tuple[float, ...],
+                          num_scheduled_tokens: Mapping[str, int]) -> None:
+    """Close one engine step; a step without a forward has no runner stamps."""
+    global _cpu_probe_runner_stamps
+    _cpu_probe_steps.append(
+        (engine_stamps, _cpu_probe_runner_stamps, num_scheduled_tokens))
+    _cpu_probe_runner_stamps = None
+
+
+def write_cpu_probe_log() -> None:
+    if not CPU_PROBE_ENABLED:
+        return
+    log_dir = os.path.dirname(_CPU_PROBE_LOG_PATH)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    with open(_CPU_PROBE_LOG_PATH, "w", encoding="utf-8") as file:
+        for step, (engine_stamps, runner_stamps,
+                   num_scheduled_tokens) in enumerate(_cpu_probe_steps):
+            record: dict[str, Any] = {"step": step}
+            record.update(zip(_CPU_PROBE_ENGINE_FIELDS, engine_stamps))
+            record.update(
+                zip(_CPU_PROBE_RUNNER_FIELDS, runner_stamps) if runner_stamps
+                else dict.fromkeys(_CPU_PROBE_RUNNER_FIELDS))
+            record["num_scheduled_tokens"] = dict(num_scheduled_tokens)
+            file.write(json.dumps(record) + "\n")
+
+
 @contextmanager
 def disable_for_warmup():
     if not _SKIP_WARMUP:
