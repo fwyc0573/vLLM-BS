@@ -2399,6 +2399,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         frontier_batch_scope = (record_function_or_nullcontext(
             f"frontier_batch_{self._frontier_batch_id}")
                                 if trace_active else nullcontext())
+        if frontier_trace.CPU_PROBE_ENABLED:
+            cpu_probe_events = frontier_trace.new_cpu_probe_events()
+            cpu_probe_events[0].record()
         with (set_forward_context(
                 attn_metadata,
                 self.vllm_config,
@@ -2418,7 +2421,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 inputs_embeds=inputs_embeds,
                 **model_kwargs,
             )
+            # Before the connector context exits, so a KV-send wait stays
+            # outside the forward's device time.
+            if frontier_trace.CPU_PROBE_ENABLED:
+                cpu_probe_events[1].record()
         forward_end = time.perf_counter()
+        if frontier_trace.CPU_PROBE_ENABLED:
+            cpu_probe_events[2].record()
         frontier_forward_end_ts = None
         if frontier_pp_boundary_trace_enabled:
             frontier_forward_end_ts = time.monotonic()
@@ -2522,6 +2531,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         with record_function_or_nullcontext("Sample"):
             sampler_output = self._sample(logits, spec_decode_metadata)
+        if frontier_trace.CPU_PROBE_ENABLED:
+            cpu_probe_events[3].record()
         sample_end = time.perf_counter()
 
         with record_function_or_nullcontext("Bookkeep"):
@@ -2568,7 +2579,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if frontier_trace.CPU_PROBE_ENABLED:
             frontier_trace.record_cpu_probe_runner_stamps(
                 (execute_start, preprocess_end, forward_end, sample_end,
-                 bookkeep_end, time.perf_counter()))
+                 bookkeep_end, time.perf_counter()), cpu_probe_events)
 
         if not self.use_async_scheduling:
             return output

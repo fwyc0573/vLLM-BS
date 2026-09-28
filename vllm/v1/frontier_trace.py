@@ -8,6 +8,8 @@ import os
 import time
 from typing import Any, Mapping, Optional, TextIO
 
+import torch
+
 _SKIP_WARMUP = os.environ.get("VLLM_FRONTIER_TRACE_SKIP_WARMUP", "0") == "1"
 _TRACE_ACTIVE = not _SKIP_WARMUP
 _PP_BOUNDARY_LOG_ENV_VAR = "VLLM_FRONTIER_PP_BOUNDARY_LOG_PATH"
@@ -94,30 +96,43 @@ def log_pp_boundary_record(record: Mapping[str, Any]) -> bool:
 # engine core process. Both keep their time.perf_counter stamps in memory, so no
 # file write lands inside a timed step, and the engine core writes every step
 # once, from EngineCore.shutdown, which the engine core's signal handler reaches.
+# The runner also records two CUDA event pairs per step, around the model
+# forward and around compute_logits plus sampling, without synchronizing; their
+# device times are read when the log is written.
 _CPU_PROBE_LOG_PATH = os.environ.get("VLLM_FRONTIER_CPU_PROBE_LOG_PATH", "")
 CPU_PROBE_ENABLED = bool(_CPU_PROBE_LOG_PATH)
 _CPU_PROBE_ENGINE_FIELDS = ("step_start", "schedule_end", "execute_end",
                             "update_end")
 _CPU_PROBE_RUNNER_FIELDS = ("execute_start", "preprocess_end", "forward_end",
                             "sample_end", "bookkeep_end", "execute_return")
-_cpu_probe_steps: list[tuple[tuple[float, ...], Optional[tuple[float, ...]],
+_CPU_PROBE_DEVICE_FIELDS = ("forward_device_ms", "sample_device_ms")
+_CpuProbeRunnerStep = tuple[tuple[float, ...], tuple[torch.cuda.Event, ...]]
+_cpu_probe_steps: list[tuple[tuple[float, ...], Optional[_CpuProbeRunnerStep],
                              Mapping[str, int]]] = []
-_cpu_probe_runner_stamps: Optional[tuple[float, ...]] = None
+_cpu_probe_runner_step: Optional[_CpuProbeRunnerStep] = None
 
 
-def record_cpu_probe_runner_stamps(stamps: tuple[float, ...]) -> None:
-    """Keep the runner's stamps of the current step (_CPU_PROBE_RUNNER_FIELDS)."""
-    global _cpu_probe_runner_stamps
-    _cpu_probe_runner_stamps = stamps
+def new_cpu_probe_events() -> tuple[torch.cuda.Event, ...]:
+    """Forward start, forward end, sample start and sample end of one step."""
+    return tuple(torch.cuda.Event(enable_timing=True) for _ in range(4))
+
+
+def record_cpu_probe_runner_stamps(
+        stamps: tuple[float, ...], events: tuple[torch.cuda.Event,
+                                                 ...]) -> None:
+    """Keep the runner's stamps (_CPU_PROBE_RUNNER_FIELDS) and CUDA events of
+    the current step."""
+    global _cpu_probe_runner_step
+    _cpu_probe_runner_step = (stamps, events)
 
 
 def record_cpu_probe_step(engine_stamps: tuple[float, ...],
                           num_scheduled_tokens: Mapping[str, int]) -> None:
     """Close one engine step; a step without a forward has no runner stamps."""
-    global _cpu_probe_runner_stamps
+    global _cpu_probe_runner_step
     _cpu_probe_steps.append(
-        (engine_stamps, _cpu_probe_runner_stamps, num_scheduled_tokens))
-    _cpu_probe_runner_stamps = None
+        (engine_stamps, _cpu_probe_runner_step, num_scheduled_tokens))
+    _cpu_probe_runner_step = None
 
 
 def write_cpu_probe_log() -> None:
@@ -126,14 +141,22 @@ def write_cpu_probe_log() -> None:
     log_dir = os.path.dirname(_CPU_PROBE_LOG_PATH)
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
+    torch.cuda.synchronize()
     with open(_CPU_PROBE_LOG_PATH, "w", encoding="utf-8") as file:
-        for step, (engine_stamps, runner_stamps,
+        for step, (engine_stamps, runner_step,
                    num_scheduled_tokens) in enumerate(_cpu_probe_steps):
             record: dict[str, Any] = {"step": step}
             record.update(zip(_CPU_PROBE_ENGINE_FIELDS, engine_stamps))
-            record.update(
-                zip(_CPU_PROBE_RUNNER_FIELDS, runner_stamps) if runner_stamps
-                else dict.fromkeys(_CPU_PROBE_RUNNER_FIELDS))
+            if runner_step is None:
+                record.update(dict.fromkeys(_CPU_PROBE_RUNNER_FIELDS))
+                record.update(dict.fromkeys(_CPU_PROBE_DEVICE_FIELDS))
+            else:
+                stamps, events = runner_step
+                record.update(zip(_CPU_PROBE_RUNNER_FIELDS, stamps))
+                record.update(
+                    zip(_CPU_PROBE_DEVICE_FIELDS,
+                        (events[0].elapsed_time(events[1]),
+                         events[2].elapsed_time(events[3]))))
             record["num_scheduled_tokens"] = dict(num_scheduled_tokens)
             file.write(json.dumps(record) + "\n")
 
