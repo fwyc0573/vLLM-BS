@@ -119,6 +119,18 @@ class P2pNcclConnector(KVConnectorBase_V1):
     # Worker-side methods
     # ==============================
 
+    def bind_connector_metadata(
+            self, connector_metadata: KVConnectorMetadata) -> None:
+        # Copy each request's block ids to the device once per step. Indexing
+        # the paged KV cache with a pageable CPU index makes every layer's
+        # extract and inject wait for a blocking host-to-device copy.
+        assert isinstance(connector_metadata, P2pNcclConnectorMetadata)
+        assert self.p2p_nccl_engine is not None
+        for request in connector_metadata.requests:
+            request.block_ids = request.block_ids.pin_memory().to(
+                self.p2p_nccl_engine.device, non_blocking=True)
+        super().bind_connector_metadata(connector_metadata)
+
     def start_load_kv(self, forward_context: "ForwardContext",
                       **kwargs) -> None:
         """Start loading the KV cache from the connector buffer to vLLM's
