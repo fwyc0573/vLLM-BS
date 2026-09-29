@@ -575,7 +575,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 FrontierCudaEventOpLogger] = None
             self._frontier_moe_routing_logger: Optional[
                 FrontierMoeRoutingLogger] = None
-            if FRONTIER_BATCH_LOG_ENABLED:
+            # The TP ranks run the same batch; only TP rank 0 writes the logs.
+            self._frontier_tp_rank = get_tp_group().rank_in_group
+            frontier_log_writer = self._frontier_tp_rank == 0
+            if FRONTIER_BATCH_LOG_ENABLED and frontier_log_writer:
                 log_dir = os.path.dirname(FRONTIER_BATCH_LOG_PATH)
                 if log_dir:
                     os.makedirs(log_dir, exist_ok=True)
@@ -586,7 +589,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     raise RuntimeError(
                         f"Failed to open Frontier batch log file: {FRONTIER_BATCH_LOG_PATH}"
                     ) from exc
-            if FRONTIER_CUDA_EVENT_OP_LOG_ENABLED:
+            if FRONTIER_CUDA_EVENT_OP_LOG_ENABLED and frontier_log_writer:
                 scopes = None
                 if FRONTIER_CUDA_EVENT_OP_SCOPES:
                     scopes = [
@@ -613,7 +616,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     FRONTIER_OP_TIMING_MODE,
                     FRONTIER_OP_AGG_MODE,
                 )
-            if FRONTIER_MOE_ROUTING_LOG_ENABLED:
+            if FRONTIER_MOE_ROUTING_LOG_ENABLED and frontier_log_writer:
                 self._frontier_moe_routing_logger = FrontierMoeRoutingLogger(
                     FRONTIER_MOE_ROUTING_LOG_PATH)
                 logger.info("Frontier MoE routing logging enabled")
@@ -2244,6 +2247,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         frontier_pp_boundary_trace_enabled = (
             FRONTIER_INSTRUMENTATION_ENABLED
             and frontier_trace.is_pp_boundary_logging_enabled()
+            and self._frontier_tp_rank == 0
         )
         frontier_preprocess_start_ts = None
         frontier_preprocess_end_ts = None
@@ -2313,7 +2317,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         if trace_active:
             frontier_op_logger = self._frontier_cuda_event_op_logger
             frontier_moe_logger = self._frontier_moe_routing_logger
-            if (FRONTIER_BATCH_LOG_ENABLED or frontier_op_logger is not None
+            if (self._frontier_batch_log_file is not None
+                    or frontier_op_logger is not None
                     or frontier_moe_logger is not None
                     or frontier_pp_boundary_trace_enabled):
                 batch_req_ids = list(self.input_batch.req_ids)
@@ -2357,6 +2362,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     "num_decode_tokens": frontier_num_decode_tokens,
                     "request_ids": list(frontier_batch_req_ids),
                     "pp_rank": frontier_pp_group.rank_in_group,
+                    "tp_rank": self._frontier_tp_rank,
                     "dp_rank": self.parallel_config.data_parallel_rank,
                     "pp_world_size": frontier_pp_group.world_size,
                     "is_first_rank": frontier_pp_group.is_first_rank,
@@ -2374,6 +2380,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     batch_num_decode_tokens=frontier_num_decode_tokens,
                     batch_request_num_tokens=frontier_req_tokens,
                     pp_rank=get_pp_group().rank_in_group,
+                    tp_rank=self._frontier_tp_rank,
                     dp_rank=self.parallel_config.data_parallel_rank,
                 )
             if frontier_moe_logger is not None:
@@ -2387,6 +2394,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     request_num_computed_tokens=frontier_req_computed_tokens,
                     request_num_scheduled_tokens=frontier_req_tokens,
                     pp_rank=get_pp_group().rank_in_group,
+                    tp_rank=self._frontier_tp_rank,
                 )
             self._frontier_forward_start_event.record()
 
@@ -2459,10 +2467,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 "batch_execution_time": forward_time_ms,
                 "timestamp": time.time(),
             })
-            if FRONTIER_BATCH_LOG_ENABLED:
-                if self._frontier_batch_log_file is None:
-                    raise RuntimeError(
-                        "Frontier batch log file is not initialized")
+            if self._frontier_batch_log_file is not None:
                 if frontier_batch_req_ids is None or frontier_req_tokens is None:
                     raise RuntimeError(
                         "Frontier batch metadata missing for logging.")
@@ -2475,6 +2480,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     "batch_execution_time_ms": forward_time_ms,
                     "timestamp": time.time(),
                     "pp_rank": get_pp_group().rank_in_group,
+                    "tp_rank": self._frontier_tp_rank,
                     "dp_rank": self.parallel_config.data_parallel_rank,
                     "request_ids": frontier_batch_req_ids,
                     "request_num_tokens": frontier_req_tokens,
@@ -2577,7 +2583,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_nans_in_logits=num_nans_in_logits,
         )
         if frontier_trace.CPU_PROBE_ENABLED:
-            frontier_trace.record_cpu_probe_runner_stamps(
+            output.cpu_probe_step = frontier_trace.cpu_probe_runner_step(
                 (execute_start, preprocess_end, forward_end, sample_end,
                  bookkeep_end, time.perf_counter()), cpu_probe_events)
 

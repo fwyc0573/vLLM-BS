@@ -449,7 +449,9 @@ class Worker(WorkerBase):
         pp_send_start_ts = None
         pp_send_end_ts = None
         activation_bytes_per_rank = 0
-        frontier_pp_boundary_trace_enabled = frontier_trace.is_pp_boundary_logging_enabled()
+        frontier_pp_boundary_trace_enabled = (
+            frontier_trace.is_pp_boundary_logging_enabled()
+            and get_tp_group().rank_in_group == 0)
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         if forward_pass and not get_pp_group().is_first_rank:
             if frontier_pp_boundary_trace_enabled:

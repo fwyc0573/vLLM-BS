@@ -25,6 +25,7 @@ def test_frontier_moe_routing_logger_writes_expected_fields(tmp_path):
         request_num_computed_tokens=[0, 5],
         request_num_scheduled_tokens=[1, 1],
         pp_rank=0,
+        tp_rank=0,
     )
 
     topk_ids = torch.tensor([[0, 1], [1, 1]], dtype=torch.int64)
@@ -56,6 +57,7 @@ def test_frontier_moe_routing_logger_writes_expected_fields(tmp_path):
     assert record["total_routed_tokens"] == 4
     assert record["per_expert_tokens"] == {"0": 1, "1": 3}
     assert record["pp_rank"] == 0 and record["dp_rank"] == 0
+    assert record["tp_rank"] == 0
     assert record["requests"] == [
         {"request_id": "req-0", "num_computed_tokens": 0,
          "num_scheduled_tokens": 1, "expert_tokens": {"0": 1, "1": 1}},
@@ -159,6 +161,7 @@ def test_frontier_moe_routing_logger_uses_local_expected_total_when_expert_map_p
         request_num_computed_tokens=[0, 5],
         request_num_scheduled_tokens=[1, 1],
         pp_rank=0,
+        tp_rank=0,
     )
 
     topk_ids = torch.tensor([[0, 1], [2, 3]], dtype=torch.int64)
@@ -204,6 +207,7 @@ def test_fused_moe_forward_cuda_logs_routing(tmp_path):
         request_num_computed_tokens=[0, 5],
         request_num_scheduled_tokens=[1, 1],
         pp_rank=0,
+        tp_rank=0,
     )
 
     hidden_states = torch.randn(2, 4)
@@ -274,6 +278,7 @@ def test_moe_routing_context_required_for_logging(tmp_path):
         request_num_computed_tokens=[0],
         request_num_scheduled_tokens=[1],
         pp_rank=0,
+        tp_rank=0,
     )
 
     topk_ids = torch.tensor([[0, 1]], dtype=torch.int64)
@@ -308,6 +313,7 @@ def test_frontier_moe_routing_logger_splits_its_dp_slice_by_request(
         request_num_computed_tokens=[16, 40],
         request_num_scheduled_tokens=[1, 1],
         pp_rank=1,
+        tp_rank=0,
     )
     # Rows 0-2 are DP rank 0's tokens; rows 3 and 4 are this rank's requests.
     topk_ids = torch.tensor([[0, 1], [0, 1], [0, 1], [2, 3], [1, 3]])
@@ -353,6 +359,7 @@ def test_frontier_moe_routing_logger_rejects_rows_that_are_not_the_batch(
         request_num_computed_tokens=[0],
         request_num_scheduled_tokens=[3],
         pp_rank=0,
+        tp_rank=0,
     )
     # A chunk of the batch, as the chunked forward path routes it.
     with logger.activate(), pytest.raises(RuntimeError, match="scheduled tokens"):

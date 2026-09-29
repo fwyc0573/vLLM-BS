@@ -19,6 +19,7 @@ def _pp_boundary_record() -> dict:
         "num_decode_tokens": 2,
         "request_ids": ["cmpl-0-0", "cmpl-1-0"],
         "pp_rank": 1,
+        "tp_rank": 0,
         "pp_world_size": 8,
         "is_first_rank": False,
         "is_last_rank": False,

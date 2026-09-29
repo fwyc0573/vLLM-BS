@@ -317,6 +317,7 @@ class EngineCore:
         if frontier_trace.CPU_PROBE_ENABLED:
             frontier_trace.record_cpu_probe_step(
                 (step_start, schedule_end, execute_end, time.perf_counter()),
+                model_output.cpu_probe_step,
                 scheduler_output.num_scheduled_tokens)
 
         self._record_frontier_iteration(scheduler_output,

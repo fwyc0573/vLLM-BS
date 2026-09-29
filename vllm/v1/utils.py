@@ -288,6 +288,7 @@ class FrontierCudaEventOpLogger:
         batch_num_decode_tokens: int,
         batch_request_num_tokens: Optional[list[int]] = None,
         pp_rank: Optional[int] = None,
+        tp_rank: Optional[int] = None,
         dp_rank: Optional[int] = None,
     ) -> None:
         if self._batch_active:
@@ -311,6 +312,8 @@ class FrontierCudaEventOpLogger:
             self._batch_meta["batch_request_num_tokens"] = batch_request_num_tokens
         if pp_rank is not None:
             self._batch_meta["pp_rank"] = int(pp_rank)
+        if tp_rank is not None:
+            self._batch_meta["tp_rank"] = int(tp_rank)
         if dp_rank is not None:
             self._batch_meta["dp_rank"] = int(dp_rank)
         self._pending_events = []
@@ -584,6 +587,7 @@ class FrontierMoeRoutingLogger:
         request_num_computed_tokens: list[int],
         request_num_scheduled_tokens: list[int],
         pp_rank: int,
+        tp_rank: int,
     ) -> None:
         if self._batch_active:
             raise RuntimeError("Frontier MoE routing batch already active.")
@@ -599,6 +603,7 @@ class FrontierMoeRoutingLogger:
             "batch_num_prefill_tokens": batch_num_prefill_tokens,
             "batch_num_decode_tokens": batch_num_decode_tokens,
             "pp_rank": pp_rank,
+            "tp_rank": tp_rank,
         }
         self._batch_requests = list(
             zip(request_ids, request_num_computed_tokens,

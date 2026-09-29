@@ -114,6 +114,10 @@ class ModelRunnerOutput:
     # req_id -> num_nans_in_logits
     num_nans_in_logits: Optional[dict[str, int]] = None
 
+    # Frontier CPU probe of this step on the output rank: the runner's
+    # time.perf_counter stamps, then its forward and sampling device times (ms).
+    cpu_probe_step: Optional[tuple[float, ...]] = None
+
 
 # ModelRunnerOutput wrapper for async scheduling.
 class AsyncModelRunnerOutput(ABC):
