@@ -1472,7 +1472,8 @@ class FusedMoE(CustomOp):
             equivalent to global logical ids, so should be compatible with
             plain MoE implementations without redundant experts.
         """
-        from vllm.model_executor.layers.fused_moe.fused_moe import fused_topk
+        from vllm.model_executor.layers.fused_moe.fused_moe import (
+            fused_topk, round_robin_topk_ids)
 
         with record_function_or_nullcontext("moe_gating"):
             # Check if we should use a routing simulation strategy
@@ -1519,6 +1520,14 @@ class FusedMoE(CustomOp):
                     renormalize=renormalize)
                 if indices_type is not None:
                     topk_ids = topk_ids.to(dtype=indices_type)
+
+            if envs.VLLM_MOE_UNIFORM_ROUTING:
+                # The router's kernels above still run, so the gating cost
+                # stays that of serving; only the chosen experts change.
+                topk_ids = round_robin_topk_ids(topk_ids.size(0),
+                                                router_logits.size(1), top_k,
+                                                topk_ids.dtype,
+                                                topk_ids.device)
 
         if enable_eplb:
             assert expert_load_view is not None

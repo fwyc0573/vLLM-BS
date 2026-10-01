@@ -1036,10 +1036,10 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "VLLM_USE_FUSED_MOE_GROUPED_TOPK":
     lambda: bool(int(os.getenv("VLLM_USE_FUSED_MOE_GROUPED_TOPK", "1"))),
 
-    # Whether to use uniform routing for MoE expert selection.
-    # When enabled, tokens are distributed uniformly across experts (N/K per expert)
-    # instead of using the gating network's routing decisions.
-    # This is useful for profiling and comparison with simulators.
+    # Whether to route MoE tokens round-robin: token i takes experts
+    # (i * top_k + k) % num_experts instead of the router's choice. The router
+    # still runs, so the gating cost is unchanged. For comparison with
+    # simulators that assume balanced routing.
     "VLLM_MOE_UNIFORM_ROUTING":
     lambda: bool(int(os.getenv("VLLM_MOE_UNIFORM_ROUTING", "0"))),
 
