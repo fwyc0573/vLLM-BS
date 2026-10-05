@@ -101,7 +101,17 @@ def log_pp_boundary_record(record: Mapping[str, Any]) -> bool:
 # its stamps and the two device times in ModelRunnerOutput.cpu_probe_step. The
 # engine core keeps every step in memory, so no file write lands inside a timed
 # step, and writes them once, from EngineCore.shutdown, which the engine core's
-# signal handler reaches.
+# signal handler reaches. Each engine core writes its own file: with data
+# parallelism, DP rank d writes <stem>_dp<d><suffix> of the configured path.
+#
+# With pipeline parallelism the engine core runs a batch queue, and its record
+# of a batch holds that batch's schedule stamps, the time its output returned
+# and the end of update_from_output (engine_loop "batch_queue"). Every stage's
+# worker (TP rank 0) also keeps a stage record per forward: its PP receive and
+# send stamps, the runner's stamps with forward_start, and the forward's device
+# time, read from CUDA events when the record is written, so the probe adds no
+# device sync to a stage. The worker writes them from Worker.shutdown to
+# <stem>[_dp<d>]_pp<p><suffix>.
 _CPU_PROBE_LOG_PATH = os.environ.get("VLLM_FRONTIER_CPU_PROBE_LOG_PATH", "")
 CPU_PROBE_ENABLED = bool(_CPU_PROBE_LOG_PATH)
 _CPU_PROBE_ENGINE_FIELDS = ("step_start", "schedule_end", "execute_end",
@@ -109,8 +119,13 @@ _CPU_PROBE_ENGINE_FIELDS = ("step_start", "schedule_end", "execute_end",
 _CPU_PROBE_RUNNER_FIELDS = ("execute_start", "preprocess_end", "forward_end",
                             "sample_end", "bookkeep_end", "execute_return",
                             "forward_device_ms", "sample_device_ms")
-_cpu_probe_steps: list[tuple[tuple[float, ...], Optional[tuple[float, ...]],
+_CPU_PROBE_STAGE_RUNNER_FIELDS = ("execute_start", "preprocess_end",
+                                  "forward_start", "forward_end",
+                                  "execute_return")
+_cpu_probe_steps: list[tuple[str, tuple[float, ...],
+                             Optional[tuple[float, ...]],
                              Mapping[str, int]]] = []
+_cpu_probe_stage_steps: list[dict[str, Any]] = []
 
 
 def new_cpu_probe_events() -> tuple[torch.cuda.Event, ...]:
@@ -133,30 +148,92 @@ def cpu_probe_runner_step(
                      events[2].elapsed_time(events[3]))
 
 
-def record_cpu_probe_step(engine_stamps: tuple[float, ...],
+def record_cpu_probe_step(engine_loop: str, engine_stamps: tuple[float, ...],
                           runner_step: Optional[tuple[float, ...]],
                           num_scheduled_tokens: Mapping[str, int]) -> None:
     """Close one engine step; a step without a forward has no runner step."""
-    _cpu_probe_steps.append((engine_stamps, runner_step, num_scheduled_tokens))
+    _cpu_probe_steps.append(
+        (engine_loop, engine_stamps, runner_step, num_scheduled_tokens))
 
 
-def write_cpu_probe_log() -> None:
-    if not CPU_PROBE_ENABLED:
-        return
-    log_dir = os.path.dirname(_CPU_PROBE_LOG_PATH)
+def record_cpu_probe_stage_step(
+        pipeline_stage_id: int, num_scheduled_tokens: Mapping[str, int],
+        recv: tuple[Optional[float], Optional[float]],
+        runner_stamps: tuple[float, ...],
+        forward_events: tuple[torch.cuda.Event, torch.cuda.Event],
+        send: tuple[Optional[float], Optional[float]]) -> None:
+    """Keep one PP stage's forward: receive, runner stamps
+    (_CPU_PROBE_STAGE_RUNNER_FIELDS), send, and the forward's event pair."""
+    record: dict[str, Any] = {
+        "pipeline_stage_id": pipeline_stage_id,
+        "recv_start": recv[0],
+        "recv_end": recv[1],
+    }
+    record.update(zip(_CPU_PROBE_STAGE_RUNNER_FIELDS, runner_stamps))
+    record.update(send_start=send[0], send_end=send[1],
+                  forward_events=forward_events,
+                  num_scheduled_tokens=dict(num_scheduled_tokens))
+    _cpu_probe_stage_steps.append(record)
+
+
+def _cpu_probe_log_path(data_parallel_rank: int, data_parallel_size: int,
+                        pipeline_stage_id: Optional[int] = None) -> str:
+    stem, suffix = os.path.splitext(_CPU_PROBE_LOG_PATH)
+    if data_parallel_size > 1:
+        stem += f"_dp{data_parallel_rank}"
+    if pipeline_stage_id is not None:
+        stem += f"_pp{pipeline_stage_id}"
+    return stem + suffix
+
+
+def _write_records(path: str, records) -> None:
+    log_dir = os.path.dirname(path)
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
-    with open(_CPU_PROBE_LOG_PATH, "w", encoding="utf-8") as file:
-        for step, (engine_stamps, runner_step,
+    with open(path, "w", encoding="utf-8") as file:
+        for record in records:
+            file.write(json.dumps(record) + "\n")
+
+
+def write_cpu_probe_log(data_parallel_rank: int,
+                        data_parallel_size: int) -> None:
+    if not CPU_PROBE_ENABLED:
+        return
+
+    def records():
+        for step, (engine_loop, engine_stamps, runner_step,
                    num_scheduled_tokens) in enumerate(_cpu_probe_steps):
-            record: dict[str, Any] = {"step": step}
+            record: dict[str, Any] = {"step": step, "engine_loop": engine_loop}
             record.update(zip(_CPU_PROBE_ENGINE_FIELDS, engine_stamps))
             if runner_step is None:
                 record.update(dict.fromkeys(_CPU_PROBE_RUNNER_FIELDS))
             else:
                 record.update(zip(_CPU_PROBE_RUNNER_FIELDS, runner_step))
             record["num_scheduled_tokens"] = dict(num_scheduled_tokens)
-            file.write(json.dumps(record) + "\n")
+            yield record
+
+    _write_records(
+        _cpu_probe_log_path(data_parallel_rank, data_parallel_size),
+        records())
+
+
+def write_cpu_probe_stage_log(data_parallel_rank: int,
+                              data_parallel_size: int) -> None:
+    if not _cpu_probe_stage_steps:
+        return
+
+    def records():
+        for step, record in enumerate(_cpu_probe_stage_steps):
+            start, end = record.pop("forward_events")
+            end.synchronize()
+            yield {"step": step, **record,
+                   "forward_device_ms": start.elapsed_time(end)}
+
+    _write_records(
+        _cpu_probe_log_path(data_parallel_rank, data_parallel_size,
+                            _cpu_probe_stage_steps[0]["pipeline_stage_id"]),
+        records())
+    _cpu_probe_stage_steps.clear()
 
 
 @contextmanager

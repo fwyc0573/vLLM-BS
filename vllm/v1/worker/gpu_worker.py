@@ -453,12 +453,18 @@ class Worker(WorkerBase):
             frontier_trace.is_pp_boundary_logging_enabled()
             and get_tp_group().rank_in_group == 0)
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
+        cpu_probe_stage = (frontier_trace.CPU_PROBE_ENABLED and forward_pass
+                           and get_pp_group().world_size > 1
+                           and get_tp_group().rank_in_group == 0)
+        cpu_probe_recv = (None, None)
         if forward_pass and not get_pp_group().is_first_rank:
             if frontier_pp_boundary_trace_enabled:
                 pp_recv_start_ts = time.monotonic()
+            cpu_probe_recv_start = time.perf_counter()
             intermediate_tensors = IntermediateTensors(
                 get_pp_group().recv_tensor_dict(
                     all_gather_group=get_tp_group()))
+            cpu_probe_recv = (cpu_probe_recv_start, time.perf_counter())
             if frontier_pp_boundary_trace_enabled:
                 pp_recv_end_ts = time.monotonic()
                 activation_bytes_per_rank = sum(
@@ -492,6 +498,11 @@ class Worker(WorkerBase):
                     # sampling before the output returns to the engine.
                     "execute_end_ts": time.monotonic(),
                 })
+            if cpu_probe_stage:
+                frontier_trace.record_cpu_probe_stage_step(
+                    get_pp_group().rank_in_group,
+                    scheduler_output.num_scheduled_tokens, cpu_probe_recv,
+                    *self.model_runner.cpu_probe_stage_step, (None, None))
             return output
 
         assert isinstance(output, IntermediateTensors)
@@ -501,8 +512,15 @@ class Worker(WorkerBase):
 
         if frontier_pp_boundary_trace_enabled:
             pp_send_start_ts = time.monotonic()
+        cpu_probe_send_start = time.perf_counter()
         get_pp_group().send_tensor_dict(output.tensors,
                                         all_gather_group=get_tp_group())
+        if cpu_probe_stage:
+            frontier_trace.record_cpu_probe_stage_step(
+                get_pp_group().rank_in_group,
+                scheduler_output.num_scheduled_tokens, cpu_probe_recv,
+                *self.model_runner.cpu_probe_stage_step,
+                (cpu_probe_send_start, time.perf_counter()))
         if frontier_pp_boundary_trace_enabled:
             pp_send_end_ts = time.monotonic()
             send_activation_bytes = sum(
@@ -755,6 +773,10 @@ class Worker(WorkerBase):
             tensorizer_config=tensorizer_config, )
 
     def shutdown(self) -> None:
+        parallel_config = self.vllm_config.parallel_config
+        frontier_trace.write_cpu_probe_stage_log(
+            parallel_config.data_parallel_rank,
+            parallel_config.data_parallel_size)
         # Guard against model_runner being None if initialization failed
         if self.model_runner is not None:
             self.model_runner.ensure_kv_transfer_shutdown()

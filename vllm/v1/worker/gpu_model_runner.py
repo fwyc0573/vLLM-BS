@@ -2244,6 +2244,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
         execute_start = time.perf_counter()
         self._frontier_pp_boundary_trace_context = None
+        # This forward's runner stamps and forward event pair for the
+        # worker's PP stage record of the Frontier CPU probe.
+        self.cpu_probe_stage_step = None
         frontier_pp_boundary_trace_enabled = (
             FRONTIER_INSTRUMENTATION_ENABLED
             and frontier_trace.is_pp_boundary_logging_enabled()
@@ -2408,6 +2411,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             f"frontier_batch_{self._frontier_batch_id}")
                                 if trace_active else nullcontext())
         if frontier_trace.CPU_PROBE_ENABLED:
+            forward_start = time.perf_counter()
             cpu_probe_events = frontier_trace.new_cpu_probe_events()
             cpu_probe_events[0].record()
         with (set_forward_context(
@@ -2509,6 +2513,11 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 assert isinstance(hidden_states, IntermediateTensors)
                 if not broadcast_pp_output:
                     hidden_states.kv_connector_output = kv_connector_output
+                    if frontier_trace.CPU_PROBE_ENABLED:
+                        self.cpu_probe_stage_step = (
+                            (execute_start, preprocess_end, forward_start,
+                             forward_end, time.perf_counter()),
+                            cpu_probe_events[:2])
                     return hidden_states
                 get_pp_group().send_tensor_dict(
                     hidden_states.tensors, all_gather_group=get_tp_group())
@@ -2583,9 +2592,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_nans_in_logits=num_nans_in_logits,
         )
         if frontier_trace.CPU_PROBE_ENABLED:
+            execute_return = time.perf_counter()
             output.cpu_probe_step = frontier_trace.cpu_probe_runner_step(
                 (execute_start, preprocess_end, forward_end, sample_end,
-                 bookkeep_end, time.perf_counter()), cpu_probe_events)
+                 bookkeep_end, execute_return), cpu_probe_events)
+            self.cpu_probe_stage_step = (
+                (execute_start, preprocess_end, forward_start, forward_end,
+                 execute_return), cpu_probe_events[:2])
 
         if not self.use_async_scheduling:
             return output

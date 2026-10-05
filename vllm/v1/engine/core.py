@@ -150,8 +150,11 @@ class EngineCore:
         # schedule and execute batches, and is required by pipeline parallelism
         # to eliminate pipeline bubbles.
         self.batch_queue_size = self.model_executor.max_concurrent_batches
+        # Each entry also carries the batch's schedule start and end stamps
+        # for the Frontier CPU probe.
         self.batch_queue: Optional[deque[tuple[Future[ModelRunnerOutput],
-                                               SchedulerOutput]]] = None
+                                               SchedulerOutput,
+                                               tuple[float, float]]]] = None
         if self.batch_queue_size > 1:
             logger.info("Batch queue is enabled with size %d",
                         self.batch_queue_size)
@@ -316,6 +319,7 @@ class EngineCore:
             scheduler_output, model_output)  # type: ignore
         if frontier_trace.CPU_PROBE_ENABLED:
             frontier_trace.record_cpu_probe_step(
+                "step",
                 (step_start, schedule_end, execute_end, time.perf_counter()),
                 model_output.cpu_probe_step,
                 scheduler_output.num_scheduled_tokens)
@@ -395,10 +399,13 @@ class EngineCore:
         model_executed = False
         scheduled_output: Optional[SchedulerOutput] = None
         if self.scheduler.has_requests():
+            schedule_start = time.perf_counter()
             scheduled_output = self.scheduler.schedule()
+            schedule_end = time.perf_counter()
             future = self.model_executor.execute_model(scheduled_output)
             batch_queue.appendleft(
-                (future, scheduled_output))  # type: ignore[arg-type]
+                (future, scheduled_output,
+                 (schedule_start, schedule_end)))  # type: ignore[arg-type]
 
             model_executed = scheduled_output.total_num_scheduled_tokens > 0
             if model_executed and len(batch_queue) < self.batch_queue_size \
@@ -418,12 +425,19 @@ class EngineCore:
             return None, False
 
         # Block until the next result is available.
-        future, scheduler_output = batch_queue.pop()
+        future, scheduler_output, schedule_stamps = batch_queue.pop()
         model_output = self.execute_model_with_error_logging(
             lambda _: future.result(), scheduler_output)
+        execute_end = time.perf_counter()
 
         engine_core_outputs = self.scheduler.update_from_output(
             scheduler_output, model_output)
+        if frontier_trace.CPU_PROBE_ENABLED:
+            frontier_trace.record_cpu_probe_step(
+                "batch_queue",
+                (*schedule_stamps, execute_end, time.perf_counter()),
+                model_output.cpu_probe_step,
+                scheduler_output.num_scheduled_tokens)
 
         self._record_frontier_iteration(scheduled_output,
                                         applied_output=True,
@@ -432,7 +446,10 @@ class EngineCore:
         return engine_core_outputs, model_executed
 
     def shutdown(self):
-        frontier_trace.write_cpu_probe_log()
+        parallel_config = self.vllm_config.parallel_config
+        frontier_trace.write_cpu_probe_log(
+            parallel_config.data_parallel_rank,
+            parallel_config.data_parallel_size)
         self.structured_output_manager.clear_backend()
         if self.model_executor:
             self.model_executor.shutdown()
