@@ -2427,6 +2427,11 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
               moe_logger_context,
               self.maybe_get_kv_connector_output(scheduler_output) as
               kv_connector_output):
+            # Entering the forward context all-reduces the token count over
+            # the DP group when no DP padding ran (enforce_eager), which waits
+            # for every DP engine core's same stage to reach its forward.
+            if frontier_trace.CPU_PROBE_ENABLED:
+                dp_sync_end = time.perf_counter()
             model_output = self.model(
                 input_ids=input_ids,
                 positions=positions,
@@ -2517,7 +2522,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     if frontier_trace.CPU_PROBE_ENABLED:
                         self.cpu_probe_stage_step = (
                             (execute_start, preprocess_end, forward_start,
-                             forward_end, time.perf_counter()),
+                             dp_sync_end, forward_end, time.perf_counter()),
                             cpu_probe_events[:2], num_input_tokens,
                             cudagraph_runtime_mode.name)
                     return hidden_states
@@ -2599,8 +2604,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                 (execute_start, preprocess_end, forward_end, sample_end,
                  bookkeep_end, execute_return), cpu_probe_events)
             self.cpu_probe_stage_step = (
-                (execute_start, preprocess_end, forward_start, forward_end,
-                 execute_return), cpu_probe_events[:2], num_input_tokens,
+                (execute_start, preprocess_end, forward_start, dp_sync_end,
+                 forward_end, execute_return), cpu_probe_events[:2],
+                num_input_tokens,
                 cudagraph_runtime_mode.name)
 
         if not self.use_async_scheduling:

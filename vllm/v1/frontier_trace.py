@@ -108,11 +108,12 @@ def log_pp_boundary_record(record: Mapping[str, Any]) -> bool:
 # of a batch holds that batch's schedule stamps, the time its output returned
 # and the end of update_from_output (engine_loop "batch_queue"). Every stage's
 # worker (TP rank 0) also keeps a stage record per forward: its PP receive and
-# send stamps, the runner's stamps with forward_start, the token count the
-# forward ran and its CUDA graph mode, and the forward's device time, read from
-# CUDA events when the record is written, so the probe adds no device sync to a
-# stage. The worker writes them from Worker.shutdown to
-# <stem>[_dp<d>]_pp<p><suffix>.
+# send stamps, the runner's stamps with forward_start and dp_sync_end (the
+# forward context entered, after the DP token-count all-reduce of an eager DP
+# forward), the token count the forward ran and its CUDA graph mode, and the
+# forward's device time, read from CUDA events when the record is written, so
+# the probe adds no device sync to a stage. The worker writes them from
+# Worker.shutdown to <stem>[_dp<d>]_pp<p><suffix>.
 _CPU_PROBE_LOG_PATH = os.environ.get("VLLM_FRONTIER_CPU_PROBE_LOG_PATH", "")
 CPU_PROBE_ENABLED = bool(_CPU_PROBE_LOG_PATH)
 _CPU_PROBE_ENGINE_FIELDS = ("step_start", "schedule_end", "execute_end",
@@ -121,8 +122,8 @@ _CPU_PROBE_RUNNER_FIELDS = ("execute_start", "preprocess_end", "forward_end",
                             "sample_end", "bookkeep_end", "execute_return",
                             "forward_device_ms", "sample_device_ms")
 _CPU_PROBE_STAGE_RUNNER_FIELDS = ("execute_start", "preprocess_end",
-                                  "forward_start", "forward_end",
-                                  "execute_return")
+                                  "forward_start", "dp_sync_end",
+                                  "forward_end", "execute_return")
 _cpu_probe_steps: list[tuple[str, tuple[float, ...],
                              Optional[tuple[float, ...]],
                              Mapping[str, int]]] = []
