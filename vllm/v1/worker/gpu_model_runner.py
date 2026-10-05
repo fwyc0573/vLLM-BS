@@ -2244,8 +2244,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
         execute_start = time.perf_counter()
         self._frontier_pp_boundary_trace_context = None
-        # This forward's runner stamps and forward event pair for the
-        # worker's PP stage record of the Frontier CPU probe.
+        # This forward's runner stamps, forward event pair, padded token count
+        # and CUDA graph mode for the worker's PP stage record of the Frontier
+        # CPU probe.
         self.cpu_probe_stage_step = None
         frontier_pp_boundary_trace_enabled = (
             FRONTIER_INSTRUMENTATION_ENABLED
@@ -2517,7 +2518,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         self.cpu_probe_stage_step = (
                             (execute_start, preprocess_end, forward_start,
                              forward_end, time.perf_counter()),
-                            cpu_probe_events[:2])
+                            cpu_probe_events[:2], num_input_tokens,
+                            cudagraph_runtime_mode.name)
                     return hidden_states
                 get_pp_group().send_tensor_dict(
                     hidden_states.tensors, all_gather_group=get_tp_group())
@@ -2598,7 +2600,8 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                  bookkeep_end, execute_return), cpu_probe_events)
             self.cpu_probe_stage_step = (
                 (execute_start, preprocess_end, forward_start, forward_end,
-                 execute_return), cpu_probe_events[:2])
+                 execute_return), cpu_probe_events[:2], num_input_tokens,
+                cudagraph_runtime_mode.name)
 
         if not self.use_async_scheduling:
             return output

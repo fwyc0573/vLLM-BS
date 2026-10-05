@@ -108,9 +108,10 @@ def log_pp_boundary_record(record: Mapping[str, Any]) -> bool:
 # of a batch holds that batch's schedule stamps, the time its output returned
 # and the end of update_from_output (engine_loop "batch_queue"). Every stage's
 # worker (TP rank 0) also keeps a stage record per forward: its PP receive and
-# send stamps, the runner's stamps with forward_start, and the forward's device
-# time, read from CUDA events when the record is written, so the probe adds no
-# device sync to a stage. The worker writes them from Worker.shutdown to
+# send stamps, the runner's stamps with forward_start, the token count the
+# forward ran and its CUDA graph mode, and the forward's device time, read from
+# CUDA events when the record is written, so the probe adds no device sync to a
+# stage. The worker writes them from Worker.shutdown to
 # <stem>[_dp<d>]_pp<p><suffix>.
 _CPU_PROBE_LOG_PATH = os.environ.get("VLLM_FRONTIER_CPU_PROBE_LOG_PATH", "")
 CPU_PROBE_ENABLED = bool(_CPU_PROBE_LOG_PATH)
@@ -161,9 +162,12 @@ def record_cpu_probe_stage_step(
         recv: tuple[Optional[float], Optional[float]],
         runner_stamps: tuple[float, ...],
         forward_events: tuple[torch.cuda.Event, torch.cuda.Event],
+        num_input_tokens: int, cudagraph_runtime_mode: str,
         send: tuple[Optional[float], Optional[float]]) -> None:
     """Keep one PP stage's forward: receive, runner stamps
-    (_CPU_PROBE_STAGE_RUNNER_FIELDS), send, and the forward's event pair."""
+    (_CPU_PROBE_STAGE_RUNNER_FIELDS), send, the forward's event pair, and the
+    token count it ran (padded for a CUDA graph and across DP ranks) with its
+    CUDA graph mode."""
     record: dict[str, Any] = {
         "pipeline_stage_id": pipeline_stage_id,
         "recv_start": recv[0],
@@ -172,6 +176,8 @@ def record_cpu_probe_stage_step(
     record.update(zip(_CPU_PROBE_STAGE_RUNNER_FIELDS, runner_stamps))
     record.update(send_start=send[0], send_end=send[1],
                   forward_events=forward_events,
+                  num_input_tokens=num_input_tokens,
+                  cudagraph_runtime_mode=cudagraph_runtime_mode,
                   num_scheduled_tokens=dict(num_scheduled_tokens))
     _cpu_probe_stage_steps.append(record)
 
