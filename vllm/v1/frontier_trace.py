@@ -93,89 +93,88 @@ def log_pp_boundary_record(record: Mapping[str, Any]) -> bool:
     return True
 
 
-# Per-step host timing (CPU probe). The engine core and the output rank's model
-# runner (TP rank 0; with one worker it runs in the engine core process) take
-# time.perf_counter stamps, which read CLOCK_MONOTONIC and so compare across the
-# processes of one host. The runner also records two CUDA event pairs per step,
-# around the model forward and around compute_logits plus sampling, and returns
-# its stamps and the two device times in ModelRunnerOutput.cpu_probe_step. The
-# engine core keeps every step in memory, so no file write lands inside a timed
-# step, and writes them once, from EngineCore.shutdown, which the engine core's
-# signal handler reaches. Each engine core writes its own file: with data
+# Per-step host timing (CPU probe). Every stamp is a time.perf_counter reading,
+# which reads CLOCK_MONOTONIC and so compares across the processes of one host.
+# Records stay in memory until shutdown, so no file write lands inside a timed
+# step.
+#
+# The engine core records each step of its loop (engine_loop "step", or
+# "batch_queue" under pipeline parallelism): the schedule stamps, the time the
+# step's output returned and the end of update_from_output. It writes them from
+# EngineCore.shutdown, which the engine core's signal handler reaches; with data
 # parallelism, DP rank d writes <stem>_dp<d><suffix> of the configured path.
 #
-# With pipeline parallelism the engine core runs a batch queue, and its record
-# of a batch holds that batch's schedule stamps, the time its output returned
-# and the end of update_from_output (engine_loop "batch_queue"). Every stage's
-# worker (TP rank 0) also keeps a stage record per forward: its PP receive and
-# send stamps, the runner's stamps with forward_start and dp_sync_end (the
-# forward context entered, after the DP token-count all-reduce of an eager DP
-# forward), the token count the forward ran and its CUDA graph mode, and the
-# forward's device time, read from CUDA events when the record is written, so
-# the probe adds no device sync to a stage. The worker writes them from
-# Worker.shutdown to <stem>[_dp<d>]_pp<p><suffix>.
+# TP rank 0 of every PP stage, a single stage included, keeps one stage record
+# per forward: its PP receive and send stamps, the runner's stamps
+# (_CPU_PROBE_RUNNER_FIELDS; sample_end and bookkeep_end only on the output
+# stage), the stamps of the forward's DP token-count all-reduce, the token count
+# the forward ran (padded for a CUDA graph and across DP ranks), its CUDA graph
+# mode and its device time. The device time comes from a CUDA event pair that
+# starts once the forward context is entered, so it leaves out the host's wait
+# for the DP all-reduce and the KV connector; it is read when the record is
+# written, so the probe adds no device sync to a forward. The worker writes the
+# records from Worker.shutdown to <stem>[_dp<d>]_pp<p><suffix>.
 _CPU_PROBE_LOG_PATH = os.environ.get("VLLM_FRONTIER_CPU_PROBE_LOG_PATH", "")
 CPU_PROBE_ENABLED = bool(_CPU_PROBE_LOG_PATH)
 _CPU_PROBE_ENGINE_FIELDS = ("step_start", "schedule_end", "execute_end",
                             "update_end")
-_CPU_PROBE_RUNNER_FIELDS = ("execute_start", "preprocess_end", "forward_end",
-                            "sample_end", "bookkeep_end", "execute_return",
-                            "forward_device_ms", "sample_device_ms")
-_CPU_PROBE_STAGE_RUNNER_FIELDS = ("execute_start", "preprocess_end",
-                                  "forward_start", "dp_sync_end",
-                                  "forward_end", "execute_return")
-_cpu_probe_steps: list[tuple[str, tuple[float, ...],
-                             Optional[tuple[float, ...]],
-                             Mapping[str, int]]] = []
+_CPU_PROBE_RUNNER_FIELDS = ("execute_start", "preprocess_end",
+                            "forward_start", "forward_context_entered",
+                            "forward_end", "sample_end", "bookkeep_end",
+                            "execute_return")
+_cpu_probe_steps: list[tuple[str, tuple[float, ...], Mapping[str, int]]] = []
 _cpu_probe_stage_steps: list[dict[str, Any]] = []
+_cpu_probe_dp_allreduce: tuple[Optional[float], Optional[float]] = (None, None)
 
 
-def new_cpu_probe_events() -> tuple[torch.cuda.Event, ...]:
-    """Forward start, forward end, sample start and sample end of one step."""
-    return tuple(torch.cuda.Event(enable_timing=True) for _ in range(4))
+def new_cpu_probe_events() -> tuple[torch.cuda.Event, torch.cuda.Event]:
+    """Start and end of one forward's device work."""
+    return (torch.cuda.Event(enable_timing=True),
+            torch.cuda.Event(enable_timing=True))
 
 
-def cpu_probe_runner_step(
-        stamps: tuple[float, ...],
-        events: tuple[torch.cuda.Event, ...]) -> tuple[float, ...]:
-    """The runner's stamps of one step followed by its forward and sampling
-    device times (_CPU_PROBE_RUNNER_FIELDS).
+def record_cpu_probe_dp_allreduce(start: float, end: float) -> None:
+    """Keep the stamps of the DP token-count all-reduce that just ran."""
+    global _cpu_probe_dp_allreduce
+    _cpu_probe_dp_allreduce = (start, end)
 
-    Without async scheduling the step's bookkeeping has already waited for the
-    sampled token ids, which the stream produces after the last event, so the
-    wait here returns at once.
-    """
-    events[3].synchronize()
-    return stamps + (events[0].elapsed_time(events[1]),
-                     events[2].elapsed_time(events[3]))
+
+def take_cpu_probe_dp_allreduce() -> tuple[Optional[float], Optional[float]]:
+    """The DP all-reduce stamps kept since the last call; (None, None) when
+    no all-reduce ran."""
+    global _cpu_probe_dp_allreduce
+    stamps, _cpu_probe_dp_allreduce = _cpu_probe_dp_allreduce, (None, None)
+    return stamps
 
 
 def record_cpu_probe_step(engine_loop: str, engine_stamps: tuple[float, ...],
-                          runner_step: Optional[tuple[float, ...]],
                           num_scheduled_tokens: Mapping[str, int]) -> None:
-    """Close one engine step; a step without a forward has no runner step."""
+    """Close one engine step (_CPU_PROBE_ENGINE_FIELDS)."""
     _cpu_probe_steps.append(
-        (engine_loop, engine_stamps, runner_step, num_scheduled_tokens))
+        (engine_loop, engine_stamps, num_scheduled_tokens))
 
 
 def record_cpu_probe_stage_step(
         pipeline_stage_id: int, num_scheduled_tokens: Mapping[str, int],
         recv: tuple[Optional[float], Optional[float]],
-        runner_stamps: tuple[float, ...],
+        runner_stamps: tuple[Optional[float], ...],
+        dp_allreduce: tuple[Optional[float], Optional[float]],
         forward_events: tuple[torch.cuda.Event, torch.cuda.Event],
         num_input_tokens: int, cudagraph_runtime_mode: str,
         send: tuple[Optional[float], Optional[float]]) -> None:
     """Keep one PP stage's forward: receive, runner stamps
-    (_CPU_PROBE_STAGE_RUNNER_FIELDS), send, the forward's event pair, and the
-    token count it ran (padded for a CUDA graph and across DP ranks) with its
-    CUDA graph mode."""
+    (_CPU_PROBE_RUNNER_FIELDS), DP all-reduce, send, the forward's event pair,
+    and the token count it ran (padded for a CUDA graph and across DP ranks)
+    with its CUDA graph mode."""
     record: dict[str, Any] = {
         "pipeline_stage_id": pipeline_stage_id,
         "recv_start": recv[0],
         "recv_end": recv[1],
     }
-    record.update(zip(_CPU_PROBE_STAGE_RUNNER_FIELDS, runner_stamps))
-    record.update(send_start=send[0], send_end=send[1],
+    record.update(zip(_CPU_PROBE_RUNNER_FIELDS, runner_stamps))
+    record.update(dp_allreduce_start=dp_allreduce[0],
+                  dp_allreduce_end=dp_allreduce[1],
+                  send_start=send[0], send_end=send[1],
                   forward_events=forward_events,
                   num_input_tokens=num_input_tokens,
                   cudagraph_runtime_mode=cudagraph_runtime_mode,
@@ -208,14 +207,10 @@ def write_cpu_probe_log(data_parallel_rank: int,
         return
 
     def records():
-        for step, (engine_loop, engine_stamps, runner_step,
+        for step, (engine_loop, engine_stamps,
                    num_scheduled_tokens) in enumerate(_cpu_probe_steps):
             record: dict[str, Any] = {"step": step, "engine_loop": engine_loop}
             record.update(zip(_CPU_PROBE_ENGINE_FIELDS, engine_stamps))
-            if runner_step is None:
-                record.update(dict.fromkeys(_CPU_PROBE_RUNNER_FIELDS))
-            else:
-                record.update(zip(_CPU_PROBE_RUNNER_FIELDS, runner_step))
             record["num_scheduled_tokens"] = dict(num_scheduled_tokens)
             yield record
 

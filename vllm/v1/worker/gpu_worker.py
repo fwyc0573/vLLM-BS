@@ -454,7 +454,6 @@ class Worker(WorkerBase):
             and get_tp_group().rank_in_group == 0)
         forward_pass = scheduler_output.total_num_scheduled_tokens > 0
         cpu_probe_stage = (frontier_trace.CPU_PROBE_ENABLED and forward_pass
-                           and get_pp_group().world_size > 1
                            and get_tp_group().rank_in_group == 0)
         cpu_probe_recv = (None, None)
         if forward_pass and not get_pp_group().is_first_rank:

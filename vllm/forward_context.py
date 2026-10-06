@@ -13,6 +13,7 @@ import torch.distributed as dist
 import vllm.envs as envs
 from vllm.config import CUDAGraphMode, ParallelConfig, VllmConfig
 from vllm.logger import init_logger
+from vllm.v1 import frontier_trace
 
 if TYPE_CHECKING:
     from vllm.attention.backends.abstract import AttentionMetadata
@@ -81,7 +82,12 @@ class DPMetadata:
                                          device="cpu",
                                          dtype=torch.int32)
         from vllm.distributed.parallel_state import get_dp_group
+        if frontier_trace.CPU_PROBE_ENABLED:
+            allreduce_start = time.perf_counter()
         dist.all_reduce(num_tokens_tensor, group=get_dp_group().cpu_group)
+        if frontier_trace.CPU_PROBE_ENABLED:
+            frontier_trace.record_cpu_probe_dp_allreduce(
+                allreduce_start, time.perf_counter())
         return num_tokens_tensor
 
     @staticmethod

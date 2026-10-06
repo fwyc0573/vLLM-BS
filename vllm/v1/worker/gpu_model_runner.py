@@ -2244,10 +2244,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
     ) -> Union[ModelRunnerOutput, AsyncModelRunnerOutput, IntermediateTensors]:
         execute_start = time.perf_counter()
         self._frontier_pp_boundary_trace_context = None
-        # This forward's runner stamps, forward event pair, padded token count
-        # and CUDA graph mode for the worker's PP stage record of the Frontier
-        # CPU probe.
+        # This forward's runner stamps, DP all-reduce stamps, forward event
+        # pair, padded token count and CUDA graph mode for the worker's PP
+        # stage record of the Frontier CPU probe.
         self.cpu_probe_stage_step = None
+        if frontier_trace.CPU_PROBE_ENABLED:
+            # A DP dummy forward since the last step all-reduced too.
+            frontier_trace.take_cpu_probe_dp_allreduce()
         frontier_pp_boundary_trace_enabled = (
             FRONTIER_INSTRUMENTATION_ENABLED
             and frontier_trace.is_pp_boundary_logging_enabled()
@@ -2413,8 +2416,6 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                                 if trace_active else nullcontext())
         if frontier_trace.CPU_PROBE_ENABLED:
             forward_start = time.perf_counter()
-            cpu_probe_events = frontier_trace.new_cpu_probe_events()
-            cpu_probe_events[0].record()
         with (set_forward_context(
                 attn_metadata,
                 self.vllm_config,
@@ -2429,9 +2430,13 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
               kv_connector_output):
             # Entering the forward context all-reduces the token count over
             # the DP group when no DP padding ran (enforce_eager), which waits
-            # for every DP engine core's same stage to reach its forward.
+            # for every DP engine core's same stage to reach its forward, and
+            # starts the KV connector's load. The device time starts here.
             if frontier_trace.CPU_PROBE_ENABLED:
-                dp_sync_end = time.perf_counter()
+                forward_context_entered = time.perf_counter()
+                dp_allreduce = frontier_trace.take_cpu_probe_dp_allreduce()
+                cpu_probe_events = frontier_trace.new_cpu_probe_events()
+                cpu_probe_events[0].record()
             model_output = self.model(
                 input_ids=input_ids,
                 positions=positions,
@@ -2444,8 +2449,6 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if frontier_trace.CPU_PROBE_ENABLED:
                 cpu_probe_events[1].record()
         forward_end = time.perf_counter()
-        if frontier_trace.CPU_PROBE_ENABLED:
-            cpu_probe_events[2].record()
         frontier_forward_end_ts = None
         if frontier_pp_boundary_trace_enabled:
             frontier_forward_end_ts = time.monotonic()
@@ -2522,8 +2525,9 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                     if frontier_trace.CPU_PROBE_ENABLED:
                         self.cpu_probe_stage_step = (
                             (execute_start, preprocess_end, forward_start,
-                             dp_sync_end, forward_end, time.perf_counter()),
-                            cpu_probe_events[:2], num_input_tokens,
+                             forward_context_entered, forward_end, None, None,
+                             time.perf_counter()), dp_allreduce,
+                            cpu_probe_events, num_input_tokens,
                             cudagraph_runtime_mode.name)
                     return hidden_states
                 get_pp_group().send_tensor_dict(
@@ -2553,8 +2557,6 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
 
         with record_function_or_nullcontext("Sample"):
             sampler_output = self._sample(logits, spec_decode_metadata)
-        if frontier_trace.CPU_PROBE_ENABLED:
-            cpu_probe_events[3].record()
         sample_end = time.perf_counter()
 
         with record_function_or_nullcontext("Bookkeep"):
@@ -2599,14 +2601,11 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             num_nans_in_logits=num_nans_in_logits,
         )
         if frontier_trace.CPU_PROBE_ENABLED:
-            execute_return = time.perf_counter()
-            output.cpu_probe_step = frontier_trace.cpu_probe_runner_step(
-                (execute_start, preprocess_end, forward_end, sample_end,
-                 bookkeep_end, execute_return), cpu_probe_events)
             self.cpu_probe_stage_step = (
-                (execute_start, preprocess_end, forward_start, dp_sync_end,
-                 forward_end, execute_return), cpu_probe_events[:2],
-                num_input_tokens,
+                (execute_start, preprocess_end, forward_start,
+                 forward_context_entered, forward_end, sample_end,
+                 bookkeep_end, time.perf_counter()), dp_allreduce,
+                cpu_probe_events, num_input_tokens,
                 cudagraph_runtime_mode.name)
 
         if not self.use_async_scheduling:

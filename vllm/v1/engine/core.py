@@ -321,7 +321,6 @@ class EngineCore:
             frontier_trace.record_cpu_probe_step(
                 "step",
                 (step_start, schedule_end, execute_end, time.perf_counter()),
-                model_output.cpu_probe_step,
                 scheduler_output.num_scheduled_tokens)
 
         self._record_frontier_iteration(scheduler_output,
@@ -436,7 +435,6 @@ class EngineCore:
             frontier_trace.record_cpu_probe_step(
                 "batch_queue",
                 (*schedule_stamps, execute_end, time.perf_counter()),
-                model_output.cpu_probe_step,
                 scheduler_output.num_scheduled_tokens)
 
         self._record_frontier_iteration(scheduled_output,
