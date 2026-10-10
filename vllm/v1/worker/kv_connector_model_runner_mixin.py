@@ -4,6 +4,7 @@
 Define KV connector functionality mixin for model runners.
 """
 import copy
+import time
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import Generator  # noqa: UP035
 from typing import TYPE_CHECKING, Optional
@@ -15,6 +16,7 @@ from vllm.distributed.kv_transfer import (ensure_kv_transfer_shutdown,
 from vllm.distributed.kv_transfer.kv_connector.base import KVConnectorBase
 from vllm.forward_context import get_forward_context, set_forward_context
 from vllm.logger import init_logger
+from vllm.v1 import frontier_trace
 from vllm.v1.outputs import (EMPTY_MODEL_RUNNER_OUTPUT, KVConnectorOutput,
                              ModelRunnerOutput)
 
@@ -109,7 +111,11 @@ class KVConnectorModelRunnerMixin:
         # These transfers are designed to be async and the requests
         # involved may be disjoint from the running requests.
         # Do this here to save a collective_rpc.
+        load_start = time.perf_counter()
         kv_connector.start_load_kv(get_forward_context())
+        if frontier_trace.CPU_PROBE_ENABLED:
+            frontier_trace.record_cpu_probe_kv_load(load_start,
+                                                    time.perf_counter())
         try:
             yield output
         finally:

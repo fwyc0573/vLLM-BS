@@ -321,7 +321,7 @@ class EngineCore:
             frontier_trace.record_cpu_probe_step(
                 "step",
                 (step_start, schedule_end, execute_end, time.perf_counter()),
-                scheduler_output.num_scheduled_tokens)
+                scheduler_output)
 
         self._record_frontier_iteration(scheduler_output,
                                         applied_output=True,
@@ -435,7 +435,7 @@ class EngineCore:
             frontier_trace.record_cpu_probe_step(
                 "batch_queue",
                 (*schedule_stamps, execute_end, time.perf_counter()),
-                scheduler_output.num_scheduled_tokens)
+                scheduler_output)
 
         self._record_frontier_iteration(scheduled_output,
                                         applied_output=True,
@@ -445,9 +445,11 @@ class EngineCore:
 
     def shutdown(self):
         parallel_config = self.vllm_config.parallel_config
+        kv_transfer_config = self.vllm_config.kv_transfer_config
         frontier_trace.write_cpu_probe_log(
             parallel_config.data_parallel_rank,
-            parallel_config.data_parallel_size)
+            parallel_config.data_parallel_size,
+            kv_transfer_config.kv_role if kv_transfer_config else None)
         self.structured_output_manager.clear_backend()
         if self.model_executor:
             self.model_executor.shutdown()

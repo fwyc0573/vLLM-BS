@@ -100,14 +100,18 @@ def log_pp_boundary_record(record: Mapping[str, Any]) -> bool:
 #
 # The engine core records each step of its loop (engine_loop "step", or
 # "batch_queue" under pipeline parallelism): the schedule stamps, the time the
-# step's output returned and the end of update_from_output. It writes them from
-# EngineCore.shutdown, which the engine core's signal handler reaches; with data
-# parallelism, DP rank d writes <stem>_dp<d><suffix> of the configured path.
+# step's output returned, the end of update_from_output, and for each scheduled
+# request its token count, its computed tokens before the step and its prompt
+# length. Every record also names the engine's KV connector role (kv_role, None
+# without a connector). It writes them from EngineCore.shutdown, which the
+# engine core's signal handler reaches; with data parallelism, DP rank d writes
+# <stem>_dp<d><suffix> of the configured path.
 #
 # TP rank 0 of every PP stage, a single stage included, keeps one stage record
 # per forward: its PP receive and send stamps, the runner's stamps
 # (_CPU_PROBE_RUNNER_FIELDS; sample_end and bookkeep_end only on the output
-# stage), the stamps of the forward's DP token-count all-reduce, the token count
+# stage), the stamps of the forward's DP token-count all-reduce, the stamps of
+# the KV connector's start_load_kv (None without a connector), the token count
 # the forward ran (padded for a CUDA graph and across DP ranks), its CUDA graph
 # mode and its device time. The device time comes from a CUDA event pair that
 # starts once the forward context is entered, so it leaves out the host's wait
@@ -122,9 +126,10 @@ _CPU_PROBE_RUNNER_FIELDS = ("execute_start", "preprocess_end",
                             "forward_start", "forward_context_entered",
                             "forward_end", "sample_end", "bookkeep_end",
                             "execute_return")
-_cpu_probe_steps: list[tuple[str, tuple[float, ...], Mapping[str, int]]] = []
+_cpu_probe_steps: list[tuple[Any, ...]] = []
 _cpu_probe_stage_steps: list[dict[str, Any]] = []
 _cpu_probe_dp_allreduce: tuple[Optional[float], Optional[float]] = (None, None)
+_cpu_probe_kv_load: tuple[Optional[float], Optional[float]] = (None, None)
 
 
 def new_cpu_probe_events() -> tuple[torch.cuda.Event, torch.cuda.Event]:
@@ -147,11 +152,30 @@ def take_cpu_probe_dp_allreduce() -> tuple[Optional[float], Optional[float]]:
     return stamps
 
 
+def record_cpu_probe_kv_load(start: float, end: float) -> None:
+    """Keep the stamps of the KV connector's start_load_kv that just ran."""
+    global _cpu_probe_kv_load
+    _cpu_probe_kv_load = (start, end)
+
+
+def take_cpu_probe_kv_load() -> tuple[Optional[float], Optional[float]]:
+    """The start_load_kv stamps kept since the last call; (None, None) when
+    no KV connector ran."""
+    global _cpu_probe_kv_load
+    stamps, _cpu_probe_kv_load = _cpu_probe_kv_load, (None, None)
+    return stamps
+
+
 def record_cpu_probe_step(engine_loop: str, engine_stamps: tuple[float, ...],
-                          num_scheduled_tokens: Mapping[str, int]) -> None:
-    """Close one engine step (_CPU_PROBE_ENGINE_FIELDS)."""
+                          scheduler_output: Any) -> None:
+    """Close one engine step (_CPU_PROBE_ENGINE_FIELDS). The computed tokens
+    and prompt lengths of its requests are joined when the log is written."""
+    cached = scheduler_output.scheduled_cached_reqs
     _cpu_probe_steps.append(
-        (engine_loop, engine_stamps, num_scheduled_tokens))
+        (engine_loop, engine_stamps, scheduler_output.num_scheduled_tokens,
+         [(new.req_id, len(new.prompt_token_ids), new.num_computed_tokens)
+          for new in scheduler_output.scheduled_new_reqs],
+         cached.req_ids, cached.num_computed_tokens))
 
 
 def record_cpu_probe_stage_step(
@@ -159,13 +183,14 @@ def record_cpu_probe_stage_step(
         recv: tuple[Optional[float], Optional[float]],
         runner_stamps: tuple[Optional[float], ...],
         dp_allreduce: tuple[Optional[float], Optional[float]],
+        kv_load: tuple[Optional[float], Optional[float]],
         forward_events: tuple[torch.cuda.Event, torch.cuda.Event],
         num_input_tokens: int, cudagraph_runtime_mode: str,
         send: tuple[Optional[float], Optional[float]]) -> None:
     """Keep one PP stage's forward: receive, runner stamps
-    (_CPU_PROBE_RUNNER_FIELDS), DP all-reduce, send, the forward's event pair,
-    and the token count it ran (padded for a CUDA graph and across DP ranks)
-    with its CUDA graph mode."""
+    (_CPU_PROBE_RUNNER_FIELDS), DP all-reduce, KV load, send, the forward's
+    event pair, and the token count it ran (padded for a CUDA graph and across
+    DP ranks) with its CUDA graph mode."""
     record: dict[str, Any] = {
         "pipeline_stage_id": pipeline_stage_id,
         "recv_start": recv[0],
@@ -174,6 +199,7 @@ def record_cpu_probe_stage_step(
     record.update(zip(_CPU_PROBE_RUNNER_FIELDS, runner_stamps))
     record.update(dp_allreduce_start=dp_allreduce[0],
                   dp_allreduce_end=dp_allreduce[1],
+                  kv_load_start=kv_load[0], kv_load_end=kv_load[1],
                   send_start=send[0], send_end=send[1],
                   forward_events=forward_events,
                   num_input_tokens=num_input_tokens,
@@ -201,17 +227,34 @@ def _write_records(path: str, records) -> None:
             file.write(json.dumps(record) + "\n")
 
 
-def write_cpu_probe_log(data_parallel_rank: int,
-                        data_parallel_size: int) -> None:
+def write_cpu_probe_log(data_parallel_rank: int, data_parallel_size: int,
+                        kv_role: Optional[str]) -> None:
     if not CPU_PROBE_ENABLED:
         return
 
     def records():
-        for step, (engine_loop, engine_stamps,
-                   num_scheduled_tokens) in enumerate(_cpu_probe_steps):
+        # A request's prompt length is sent once, when it is first scheduled.
+        num_prompt_tokens: dict[str, int] = {}
+        for step, (engine_loop, engine_stamps, num_scheduled_tokens, new_reqs,
+                   cached_req_ids, cached_num_computed_tokens) in enumerate(
+                       _cpu_probe_steps):
+            num_computed_tokens = dict(
+                zip(cached_req_ids, cached_num_computed_tokens))
+            for req_id, prompt_len, computed in new_reqs:
+                num_prompt_tokens[req_id] = prompt_len
+                num_computed_tokens[req_id] = computed
             record: dict[str, Any] = {"step": step, "engine_loop": engine_loop}
             record.update(zip(_CPU_PROBE_ENGINE_FIELDS, engine_stamps))
             record["num_scheduled_tokens"] = dict(num_scheduled_tokens)
+            record["num_computed_tokens"] = {
+                req_id: num_computed_tokens[req_id]
+                for req_id in num_scheduled_tokens
+            }
+            record["num_prompt_tokens"] = {
+                req_id: num_prompt_tokens[req_id]
+                for req_id in num_scheduled_tokens
+            }
+            record["kv_role"] = kv_role
             yield record
 
     _write_records(

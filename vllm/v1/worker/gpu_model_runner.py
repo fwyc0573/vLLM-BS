@@ -2249,8 +2249,10 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
         # stage record of the Frontier CPU probe.
         self.cpu_probe_stage_step = None
         if frontier_trace.CPU_PROBE_ENABLED:
-            # A DP dummy forward since the last step all-reduced too.
+            # A DP dummy forward since the last step all-reduced too, and a
+            # step without a forward can run the KV connector.
             frontier_trace.take_cpu_probe_dp_allreduce()
+            frontier_trace.take_cpu_probe_kv_load()
         frontier_pp_boundary_trace_enabled = (
             FRONTIER_INSTRUMENTATION_ENABLED
             and frontier_trace.is_pp_boundary_logging_enabled()
@@ -2435,6 +2437,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             if frontier_trace.CPU_PROBE_ENABLED:
                 forward_context_entered = time.perf_counter()
                 dp_allreduce = frontier_trace.take_cpu_probe_dp_allreduce()
+                kv_load = frontier_trace.take_cpu_probe_kv_load()
                 cpu_probe_events = frontier_trace.new_cpu_probe_events()
                 cpu_probe_events[0].record()
             model_output = self.model(
@@ -2526,7 +2529,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
                         self.cpu_probe_stage_step = (
                             (execute_start, preprocess_end, forward_start,
                              forward_context_entered, forward_end, None, None,
-                             time.perf_counter()), dp_allreduce,
+                             time.perf_counter()), dp_allreduce, kv_load,
                             cpu_probe_events, num_input_tokens,
                             cudagraph_runtime_mode.name)
                     return hidden_states
@@ -2604,7 +2607,7 @@ class GPUModelRunner(LoRAModelRunnerMixin, KVConnectorModelRunnerMixin):
             self.cpu_probe_stage_step = (
                 (execute_start, preprocess_end, forward_start,
                  forward_context_entered, forward_end, sample_end,
-                 bookkeep_end, time.perf_counter()), dp_allreduce,
+                 bookkeep_end, time.perf_counter()), dp_allreduce, kv_load,
                 cpu_probe_events, num_input_tokens,
                 cudagraph_runtime_mode.name)
 
